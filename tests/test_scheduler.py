@@ -108,3 +108,19 @@ def test_main_check_mode_initializes_dependencies_without_starting_scheduler(mon
     assert app_main.main(["--check"]) == 0
     assert dummy_scheduler.started is False
     assert dummy_scheduler.shutdown_called is False
+
+
+def test_main_can_run_as_script_path_for_help() -> None:
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [sys.executable, "app/main.py", "--help"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    assert "Run the Telegram publication automation service" in result.stdout
+    assert "ModuleNotFoundError" not in result.stderr

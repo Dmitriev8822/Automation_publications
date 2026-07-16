@@ -7,6 +7,10 @@ import logging
 import signal
 import sys
 from collections.abc import Sequence
+from pathlib import Path
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pytest
 
