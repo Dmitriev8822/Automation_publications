@@ -85,3 +85,6 @@ def validate_runtime_settings(settings: Settings) -> None:
     if missing:
         joined = ", ".join(missing)
         raise ValueError(f"Missing required production settings: {joined}")
+
+    if settings.telegram_bot_token and ":" not in settings.telegram_bot_token:
+        raise ValueError("TELEGRAM_BOT_TOKEN must be a real bot token in the '<bot_id>:<secret>' format")

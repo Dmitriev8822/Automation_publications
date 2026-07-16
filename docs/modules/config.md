@@ -53,6 +53,7 @@ settings = Settings(_env_file=None, APP_ENV="test")
 
 - Если `APP_ENV` не равен `dev`, `test` или `prod`, `Settings` выбрасывает ошибку валидации Pydantic.
 - Если `validate_runtime_settings()` вызывается для `prod` без `OPENROUTER_API_KEY`, `TELEGRAM_BOT_TOKEN` или `TELEGRAM_CHANNEL_ID`, выбрасывается `ValueError`.
+- В `prod` `TELEGRAM_BOT_TOKEN` дополнительно проверяется на базовый формат Telegram-токена `<bot_id>:<secret>`, чтобы ошибка конфигурации была понятной до создания `TeleBot`.
 - В `dev` и `test` реальные секреты не обязательны.
 - Модуль не вызывает `sys.exit()`.
 
@@ -78,8 +79,8 @@ PUBLISH_INTERVAL_MINUTES=30
 OPENROUTER_API_KEY=
 OPENROUTER_MODEL=openai/gpt-4o-mini
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
-TELEGRAM_BOT_TOKEN=
-TELEGRAM_CHANNEL_ID=
+TELEGRAM_BOT_TOKEN=123456789:replace_with_real_secret
+TELEGRAM_CHANNEL_ID=@your_channel
 NEWS_TOPIC=technology
 NEWS_LANGUAGE=ru
 POST_LANGUAGE=ru
