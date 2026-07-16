@@ -1,0 +1,129 @@
+Архитектура MVP сервиса для Telegram-канала
+1. Инструменты и библиотеки
+Задача
+Инструмент
+Язык
+Python
+Работа с OpenRouter
+openrouter
+Telegram
+pyTelegramBotAPI
+База данных и ORM
+SQLAlchemy
+База данных для MVP
+SQLite
+Расписание
+APScheduler
+Настройки из .env
+pydantic-settings
+Проверка данных
+Pydantic
+Тестирование
+pytest
+Логирование
+стандартный модуль logging
+
+
+2. Модули приложения
+Архитектура приложения модульная. Каждый модуль отвечает за отдельную задачу.
+ai
+поиск свежих новостей через OpenRouter;
+генерация текста;
+генерация изображения.
+telegram
+подключение Telegram-бота;
+публикация поста и изображения.
+database
+работа с SQLite через SQLAlchemy;
+проверка и сохранение опубликованных новостей.
+service
+основная последовательность создания и публикации поста;
+взаимодействие с остальными модулями.
+scheduler
+запуск публикации каждые 30 минут.
+config
+загрузка настроек и ключей из .env.
+tests
+проверка основных модулей;
+запуск быстрых тестов при старте приложения;
+запуск сервиса только после успешного прохождения тестов.
+Тесты при запуске не должны обращаться к реальным OpenRouter и Telegram API.
+docs
+описание структуры проекта;
+назначение файлов и модулей;
+основные правила работы приложения;
+контекст для ИИ, который будет изменять код.
+
+3. Процесс работы
+Запуск приложения
+        ↓
+Выполнение быстрых тестов
+        ↓
+Запуск APScheduler
+        ↓
+Поиск свежих новостей через OpenRouter
+        ↓
+Выбор неопубликованной новости
+        ↓
+Генерация текста и изображения
+        ↓
+Публикация в Telegram
+        ↓
+Сохранение результата в БД
+
+
+4. Структура проекта
+ai_telegram_channel/
+├── app/
+│   ├── main.py
+│   ├── config.py
+│   ├── scheduler.py
+│   ├── service.py
+│   ├── ai.py
+│   ├── telegram.py
+│   ├── database.py
+│   └── schemas.py
+│
+├── tests/
+│   └── test_service.py
+│
+├── docs/
+│   └── ARCHITECTURE.md
+│
+├── AGENTS.md
+├── .env
+├── .env.example
+├── requirements.txt
+└── README.md
+
+tests/ — автоматические проверки приложения;
+docs/ARCHITECTURE.md — описание архитектуры;
+AGENTS.md — краткие инструкции и контекст для ИИ;
+README.md — установка и запуск проекта.
+
+5. Основные сущности
+News
+class News:
+    title: str
+    source_url: str
+    source_name: str
+    summary: str
+
+GeneratedPost
+class GeneratedPost:
+    title: str
+    text: str
+    image_prompt: str
+    source_url: str
+
+Post
+class Post:
+    id: int
+    source_url: str
+    title: str
+    text: str
+    status: str
+    telegram_message_id: int | None
+
+
+
