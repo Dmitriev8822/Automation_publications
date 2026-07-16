@@ -80,3 +80,31 @@ def test_main_does_not_start_scheduler_when_startup_tests_fail(monkeypatch: pyte
 
     assert app_main.main() == 1
     assert dummy_scheduler.started is False
+
+
+def test_main_check_mode_initializes_dependencies_without_starting_scheduler(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app import main as app_main
+
+    class DummySettings:
+        log_level = "INFO"
+        publish_interval_minutes = 1
+
+    class DummyScheduler:
+        started = False
+        shutdown_called = False
+
+        def start(self) -> None:
+            self.started = True
+
+        def shutdown(self, wait: bool = False) -> None:
+            self.shutdown_called = True
+
+    dummy_scheduler = DummyScheduler()
+    monkeypatch.setattr(app_main, "get_settings", lambda: DummySettings())
+    monkeypatch.setattr(app_main, "configure_logging", lambda log_level: None)
+    monkeypatch.setattr(app_main, "run_startup_tests", lambda: True)
+    monkeypatch.setattr(app_main, "build_scheduler", lambda settings: dummy_scheduler)
+
+    assert app_main.main(["--check"]) == 0
+    assert dummy_scheduler.started is False
+    assert dummy_scheduler.shutdown_called is False
