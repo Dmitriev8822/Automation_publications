@@ -40,6 +40,30 @@ def test_scheduler_job_logs_exceptions_without_reraising(caplog: pytest.LogCaptu
     assert "boom" in caplog.text
 
 
+def test_run_startup_tests_suppresses_existing_root_handlers(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app import main as app_main
+
+    root_logger = app_main.logging.getLogger()
+    handler = app_main.logging.StreamHandler()
+    handler.setLevel(app_main.logging.INFO)
+    root_logger.addHandler(handler)
+    observed_handler_levels: list[int] = []
+
+    def fake_pytest_main(args):
+        observed_handler_levels.append(handler.level)
+        app_main.logging.getLogger("app.service").error("hidden startup-test log")
+        return app_main.pytest.ExitCode.OK
+
+    monkeypatch.setattr(app_main.pytest, "main", fake_pytest_main)
+
+    try:
+        assert app_main.run_startup_tests(("tests", "-q")) is True
+        assert observed_handler_levels == [app_main.logging.CRITICAL + 1]
+        assert handler.level == app_main.logging.INFO
+    finally:
+        root_logger.removeHandler(handler)
+
+
 def test_main_import_does_not_start_application(monkeypatch: pytest.MonkeyPatch) -> None:
     started = False
 

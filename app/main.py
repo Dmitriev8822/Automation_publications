@@ -39,7 +39,16 @@ def run_startup_tests(args: Sequence[str] = STARTUP_TEST_ARGS) -> bool:
     """Run fast startup checks and return whether they passed."""
 
     logger.info("Running startup tests: pytest %s", " ".join(args))
-    exit_code = pytest.main(list(args))
+    root_logger = logging.getLogger()
+    previous_handler_levels = [(handler, handler.level) for handler in root_logger.handlers]
+    for handler, _level in previous_handler_levels:
+        handler.setLevel(logging.CRITICAL + 1)
+    try:
+        exit_code = pytest.main(list(args))
+    finally:
+        for handler, level in previous_handler_levels:
+            handler.setLevel(level)
+
     if exit_code != pytest.ExitCode.OK:
         logger.error("Startup tests failed with exit code %s", exit_code)
         return False

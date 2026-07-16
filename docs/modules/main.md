@@ -9,7 +9,7 @@
 ## Публичные классы и функции
 
 - `configure_logging(log_level: str) -> None` — настраивает root logging.
-- `run_startup_tests(args: Sequence[str] = STARTUP_TEST_ARGS) -> bool` — запускает быстрые тесты через `pytest` и возвращает результат.
+- `run_startup_tests(args: Sequence[str] = STARTUP_TEST_ARGS) -> bool` — запускает быстрые тесты через `pytest`, временно подавляет application-логи тестовых fake-сценариев и возвращает результат.
 - `build_scheduler(settings: Settings) -> BackgroundScheduler` — валидирует runtime-настройки, инициализирует БД, создает `AIClient`, `TelegramPublisher`, `PostRepository` и регистрирует job публикации.
 - `parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace` — разбирает CLI-аргументы приложения.
 - `main(argv: Sequence[str] | None = None) -> int` — основной сценарий запуска приложения.
@@ -40,7 +40,7 @@ python app/main.py --check
 `main.py` собирает зависимости по архитектурной схеме:
 
 1. `get_settings()` из `app.config` загружает `.env`.
-2. `run_startup_tests()` запускает быстрый набор `pytest`.
+2. `run_startup_tests()` запускает быстрый набор `pytest` и временно отключает вывод application-логов из тестов, чтобы при штатном `python app/main.py` пользователь видел только результат тестов, а не ожидаемые тестовые traceback-и.
 3. `validate_runtime_settings(settings)` проверяет обязательные production-секреты.
 4. `init_db()` из `app.database` создает таблицы.
 5. `PostRepository`, `AIClient` и `TelegramPublisher` создаются и передаются в `app.service.create_and_publish_post()` через scheduler job.
@@ -49,7 +49,7 @@ python app/main.py --check
 ## Обработка ошибок
 
 - При прямом запуске `python app/main.py` модуль добавляет корень репозитория в `sys.path`, чтобы абсолютные импорты `app.*` работали так же, как при `python -m app.main`.
-- Если startup-тесты не прошли, `main()` возвращает `1` и не запускает scheduler.
+- Если startup-тесты не прошли, `main()` возвращает `1` и не запускает scheduler; логи, созданные внутри самих тестов, на время pytest подавляются.
 - Если production-секреты отсутствуют или Telegram-токен не похож на формат `<bot_id>:<secret>`, `validate_runtime_settings()` выбрасывает `ValueError`; `main()` логирует понятную ошибку старта и возвращает код `1` до создания Telegram-клиента.
 - Если не удается создать Telegram/OpenRouter-зависимости, ошибка возникает на этапе `build_scheduler()` до запуска scheduler; при CLI-запуске она превращается в лог `Application startup failed: ...` и код возврата `1`.
 - Ошибки внутри самой publication job логируются в `app.scheduler` и не останавливают будущие запуски.
