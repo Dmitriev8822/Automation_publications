@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     publish_interval_minutes: int = Field(default=30, alias="PUBLISH_INTERVAL_MINUTES", ge=1)
 
     openrouter_api_key: str | None = Field(default=None, alias="OPENROUTER_API_KEY")
-    openrouter_model: str = Field(default="openai/gpt-4o-mini", alias="OPENROUTER_MODEL")
+    openrouter_model: str = Field(default="openai/gpt-4.1-mini", alias="OPENROUTER_MODEL")
     openrouter_base_url: AnyUrl = Field(
         default="https://openrouter.ai/api/v1", alias="OPENROUTER_BASE_URL"
     )

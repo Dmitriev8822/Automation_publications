@@ -186,10 +186,33 @@ class AIClient:
         }
 
         try:
+            data = self._send_chat_completion_request(request_payload, headers, schema_name)
+        except OpenRouterRequestError:
+            logger.warning(
+                "Retrying OpenRouter request with json_object response format: model=%s schema=%s",
+                self.settings.openrouter_model,
+                schema_name,
+            )
+            fallback_payload = dict(request_payload)
+            fallback_payload["response_format"] = {"type": "json_object"}
+            data = self._send_chat_completion_request(fallback_payload, headers, schema_name)
+
+        if not isinstance(data, dict):
+            raise OpenRouterResponseError("OpenRouter response must be a JSON object")
+        logger.info("OpenRouter request completed successfully: schema=%s", schema_name)
+        return data
+
+    def _send_chat_completion_request(
+        self,
+        request_payload: dict[str, Any],
+        headers: dict[str, str],
+        schema_name: str,
+    ) -> dict[str, Any]:
+        try:
             response = self.http_client.post(self.settings.chat_completions_url, json=request_payload, headers=headers)
             if hasattr(response, "raise_for_status"):
                 response.raise_for_status()
-            data = response.json() if hasattr(response, "json") else response
+            return response.json() if hasattr(response, "json") else response
         except Exception as exc:  # noqa: BLE001 - normalize third-party/client errors for callers
             logger.warning(
                 "OpenRouter request failed: endpoint=%s model=%s schema=%s error=%s",
@@ -199,11 +222,6 @@ class AIClient:
                 exc,
             )
             raise OpenRouterRequestError("OpenRouter request failed") from exc
-
-        if not isinstance(data, dict):
-            raise OpenRouterResponseError("OpenRouter response must be a JSON object")
-        logger.info("OpenRouter request completed successfully: schema=%s", schema_name)
-        return data
 
     @staticmethod
     def _extract_message_content(response: dict[str, Any]) -> Any:

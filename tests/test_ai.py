@@ -36,6 +36,18 @@ class FakeHTTPClient:
         return FakeResponse({"choices": [{"message": {"content": content}}]})
 
 
+class FailingThenSuccessfulHTTPClient:
+    def __init__(self, content: str) -> None:
+        self.content = content
+        self.requests: list[dict] = []
+
+    def post(self, url: str, **kwargs):
+        self.requests.append({"url": url, **kwargs})
+        if len(self.requests) == 1:
+            raise RuntimeError("400 Bad Request")
+        return FakeResponse({"choices": [{"message": {"content": self.content}}]})
+
+
 def make_settings(**overrides) -> Settings:
     defaults = {
         "openrouter_api_key": "test-key",
@@ -154,3 +166,28 @@ def test_find_fresh_news_stores_error_message_on_request_failure() -> None:
 
     assert client.find_fresh_news() == []
     assert client.last_error_message == "OpenRouter request failed"
+
+
+def test_find_fresh_news_retries_with_json_object_when_json_schema_request_fails() -> None:
+    content = json.dumps(
+        {
+            "news": [
+                {
+                    "title": "New model",
+                    "source_url": "https://example.com/new-model",
+                    "source_name": "Example",
+                    "summary": "A newer model became available.",
+                }
+            ]
+        }
+    )
+    http_client = FailingThenSuccessfulHTTPClient(content)
+    client = AIClient(settings=make_settings(), http_client=http_client)
+
+    news = client.find_fresh_news()
+
+    assert len(news) == 1
+    assert news[0].title == "New model"
+    assert len(http_client.requests) == 2
+    assert http_client.requests[0]["json"]["response_format"]["type"] == "json_schema"
+    assert http_client.requests[1]["json"]["response_format"]["type"] == "json_object"

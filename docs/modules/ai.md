@@ -24,12 +24,15 @@ image = ai_client.generate_image(generated_post)
 ## OpenRouter API
 
 Клиент отправляет `POST` на endpoint `OPENROUTER_BASE_URL/chat/completions` с Bearer-токеном из
-`OPENROUTER_API_KEY`. Запрос использует OpenAI-compatible chat completions формат: `model`, `messages` и
-`response_format`.
+`OPENROUTER_API_KEY`. По умолчанию используется более новая модель `openai/gpt-4.1-mini`. Запрос использует
+OpenAI-compatible chat completions формат: `model`, `messages` и `response_format`.
 
 По официальной документации OpenRouter chat completions создаются через `POST /chat/completions`, а
-`response_format` поддерживает JSON mode и `json_schema` structured outputs. Поэтому `AIClient` передаёт
-`response_format = {"type": "json_schema", ...}` и дополнительно просит модель возвращать только JSON.
+`response_format` поддерживает JSON mode и `json_schema` structured outputs. Поэтому `AIClient` сначала передаёт
+`response_format = {"type": "json_schema", ...}` и дополнительно просит модель возвращать только JSON. Если провайдер
+или конкретная модель отклоняет строгую JSON Schema с HTTP 400/другой ошибкой запроса, клиент автоматически повторяет
+тот же запрос с более совместимым `response_format = {"type": "json_object"}`. Это сохраняет работу сервиса с моделями,
+у которых structured outputs временно недоступны или отличаются по требованиям.
 
 ## Prompt'ы
 
@@ -97,7 +100,7 @@ System prompt задаёт роль генератора безопасного 
 
 ## Обработка ошибок
 
-- Ошибки HTTP-клиента и статусов OpenRouter нормализуются в `OpenRouterRequestError`.
+- Ошибки HTTP-клиента и статусов OpenRouter нормализуются в `OpenRouterRequestError`; перед окончательной ошибкой клиент делает fallback с `json_object`, если первый запрос с `json_schema` был отклонён.
 - Невалидная структура ответа нормализуется в `OpenRouterResponseError`.
 - `find_fresh_news()` при пустом ответе, невалидном JSON или ошибке валидации возвращает пустой список: это
   безопасно для пайплайна публикаций, потому что сервис может пропустить текущий запуск.
@@ -112,7 +115,7 @@ System prompt задаёт роль генератора безопасного 
 На генерацию влияют:
 
 - `OPENROUTER_API_KEY` — ключ OpenRouter;
-- `OPENROUTER_MODEL` — модель для chat completions;
+- `OPENROUTER_MODEL` — модель для chat completions; дефолт `openai/gpt-4.1-mini`;
 - `OPENROUTER_BASE_URL` — базовый URL OpenRouter API;
 - `NEWS_TOPIC` — тема поиска новостей;
 - `NEWS_LANGUAGE` — язык новостного саммари;
