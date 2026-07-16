@@ -82,6 +82,24 @@ def test_main_does_not_start_scheduler_when_startup_tests_fail(monkeypatch: pyte
     assert dummy_scheduler.started is False
 
 
+def test_main_returns_error_when_dependency_setup_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app import main as app_main
+
+    class DummySettings:
+        log_level = "INFO"
+
+    monkeypatch.setattr(app_main, "get_settings", lambda: DummySettings())
+    monkeypatch.setattr(app_main, "configure_logging", lambda log_level: None)
+    monkeypatch.setattr(app_main, "run_startup_tests", lambda: True)
+    monkeypatch.setattr(
+        app_main,
+        "build_scheduler",
+        lambda settings: (_ for _ in ()).throw(ValueError("bad runtime settings")),
+    )
+
+    assert app_main.main(["--check"]) == 1
+
+
 def test_main_check_mode_initializes_dependencies_without_starting_scheduler(monkeypatch: pytest.MonkeyPatch) -> None:
     from app import main as app_main
 

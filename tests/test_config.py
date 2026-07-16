@@ -79,6 +79,19 @@ def test_prod_requires_openrouter_and_telegram_settings():
     assert "TELEGRAM_CHANNEL_ID" in str(exc_info.value)
 
 
+def test_prod_rejects_malformed_telegram_token():
+    settings = Settings(
+        APP_ENV="prod",
+        OPENROUTER_API_KEY="test-openrouter-key",
+        TELEGRAM_BOT_TOKEN="not-a-real-token",
+        TELEGRAM_CHANNEL_ID="@test_channel",
+        _env_file=None,
+    )
+
+    with pytest.raises(ValueError, match="TELEGRAM_BOT_TOKEN.*<bot_id>:<secret>"):
+        validate_runtime_settings(settings)
+
+
 def test_dev_allows_missing_secrets():
     settings = Settings(APP_ENV="dev", _env_file=None)
 
