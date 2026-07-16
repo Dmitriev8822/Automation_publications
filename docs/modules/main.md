@@ -2,7 +2,7 @@
 
 ## Назначение
 
-`app/main.py` — точка входа приложения. Модуль не содержит бизнес-логику публикации: он загружает настройки, настраивает логирование, запускает быстрые startup-тесты, инициализирует зависимости и стартует APScheduler.
+`app/main.py` — точка входа приложения. Модуль не содержит бизнес-логику публикации: он загружает настройки, настраивает логирование, запускает быстрые startup-тесты, инициализирует зависимости, стартует APScheduler и запускает Telegram long polling для кнопки ручной публикации.
 
 Дополнительно модуль поддерживает режим проверки `--check`: он выполняет те же startup-проверки и сборку зависимостей, но не запускает бесконечный scheduler-цикл. Этот режим нужен после заполнения `.env`, чтобы убедиться, что сервис готов к запуску.
 
@@ -11,6 +11,7 @@
 - `configure_logging(log_level: str) -> None` — настраивает root logging.
 - `run_startup_tests(args: Sequence[str] = STARTUP_TEST_ARGS) -> bool` — запускает быстрые тесты через `pytest`, временно подавляет application-логи тестовых fake-сценариев и возвращает результат.
 - `build_scheduler(settings: Settings) -> BackgroundScheduler` — валидирует runtime-настройки, инициализирует БД, создает `AIClient`, `TelegramPublisher`, `PostRepository` и регистрирует job публикации.
+- `build_runtime(settings: Settings) -> ApplicationRuntime` — собирает зависимости для scheduled и manual publication entrypoints, регистрирует кнопку ручной публикации в Telegram и возвращает scheduler вместе с Telegram publisher.
 - `parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace` — разбирает CLI-аргументы приложения.
 - `main(argv: Sequence[str] | None = None) -> int` — основной сценарий запуска приложения.
 
@@ -44,7 +45,9 @@ python app/main.py --check
 3. `validate_runtime_settings(settings)` проверяет обязательные production-секреты.
 4. `init_db()` из `app.database` создает таблицы.
 5. `PostRepository`, `AIClient` и `TelegramPublisher` создаются и передаются в `app.service.create_and_publish_post()` через scheduler job.
-6. `create_scheduler()` из `app.scheduler` регистрирует периодический запуск публикации.
+6. Для Telegram-бота регистрируется кнопка `📰 Опубликовать новость`; ее handler вызывает тот же `create_and_publish_post(...)`, но передает `progress_callback`, чтобы пользователь видел короткие статусы выполнения.
+7. `create_scheduler()` из `app.scheduler` регистрирует периодический запуск публикации.
+8. После старта scheduler запускается `TelegramPublisher.start_manual_polling()`, чтобы бот принимал `/start` и нажатия кнопки.
 
 ## Обработка ошибок
 
