@@ -118,3 +118,27 @@ def test_generate_image_returns_none_when_disabled() -> None:
 
     assert client.generate_image(post) is None
     assert http_client.requests == []
+
+
+def test_generate_image_parses_url_asset() -> None:
+    content = json.dumps(
+        {
+            "url": "https://example.com/image.png",
+            "mime_type": "image/png",
+        }
+    )
+    http_client = FakeHTTPClient([content])
+    client = AIClient(settings=make_settings(enable_image_generation=True), http_client=http_client)
+    post = GeneratedPost(
+        title="AI release",
+        text="Fresh Telegram-ready post",
+        image_prompt="Editorial illustration",
+        source_url="https://example.com/ai-release",
+    )
+
+    image = client.generate_image(post)
+
+    assert image is not None
+    assert str(image.url) == "https://example.com/image.png"
+    assert image.mime_type == "image/png"
+    assert len(http_client.requests) == 1
