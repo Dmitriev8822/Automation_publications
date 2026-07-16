@@ -20,6 +20,8 @@ app/database.py → проверка дублей и сохранение рез
 app/telegram.py → публикация в Telegram
 ```
 
+Дополнительно `app/main.py` регистрирует в Telegram-боте кнопку ручной публикации. При нажатии кнопки бот вызывает тот же бизнес-сценарий `app/service.py`, что и scheduler, и отправляет пользователю короткие статусные сообщения о ходе поиска новости, генерации и публикации.
+
 ## Модули
 
 | Модуль | Файл | Ответственность |
@@ -28,7 +30,7 @@ app/telegram.py → публикация в Telegram
 | schemas | `app/schemas.py` | Общие Pydantic-сущности и enum-статусы |
 | database | `app/database.py` | SQLite, SQLAlchemy, репозиторий публикаций |
 | ai | `app/ai.py` | OpenRouter: поиск новостей, генерация текста и изображения |
-| telegram | `app/telegram.py` | pyTelegramBotAPI: отправка текста/изображений в канал |
+| telegram | `app/telegram.py` | pyTelegramBotAPI: отправка текста/изображений в канал и кнопка ручной публикации |
 | service | `app/service.py` | Главный сценарий создания и публикации поста |
 | scheduler | `app/scheduler.py` | Периодический запуск сценария через APScheduler |
 | main | `app/main.py` | Точка входа: тесты, инициализация БД, запуск планировщика |
