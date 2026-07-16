@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Mapping
 from typing import Any, Protocol
 
@@ -10,6 +11,8 @@ from pydantic import BaseModel, Field, ValidationError
 
 from app.config import Settings, get_settings
 from app.schemas import GeneratedPost, ImageAsset, News
+
+logger = logging.getLogger(__name__)
 
 
 class AIClientError(RuntimeError):
@@ -67,6 +70,7 @@ class AIClient:
         """
 
         try:
+            logger.info("Requesting fresh news from OpenRouter")
             payload = self._chat_json(
                 system_prompt=self._news_system_prompt(),
                 user_prompt=self._news_user_prompt(),
@@ -74,14 +78,17 @@ class AIClient:
                 schema_name="fresh_news",
             )
             response = NewsListResponse.model_validate(payload)
-        except (AIClientError, ValidationError, TypeError, ValueError):
+        except (AIClientError, ValidationError, TypeError, ValueError) as exc:
+            logger.warning("Could not fetch fresh news from OpenRouter: %s", exc)
             return []
 
+        logger.info("OpenRouter returned %d fresh news item(s)", len(response.news))
         return response.news[: self.settings.max_news_items]
 
     def generate_post(self, news: News) -> GeneratedPost:
         """Generate a Telegram post from one news item."""
 
+        logger.info("Requesting Telegram post generation from OpenRouter")
         payload = self._chat_json(
             system_prompt=self._post_system_prompt(),
             user_prompt=self._post_user_prompt(news),
@@ -103,6 +110,7 @@ class AIClient:
         if not self.settings.enable_image_generation:
             return None
 
+        logger.info("Requesting image generation from OpenRouter")
         payload = self._chat_json(
             system_prompt=self._image_system_prompt(),
             user_prompt=self._image_user_prompt(post),
@@ -161,10 +169,12 @@ class AIClient:
                 response.raise_for_status()
             data = response.json() if hasattr(response, "json") else response
         except Exception as exc:  # noqa: BLE001 - normalize third-party/client errors for callers
+            logger.warning("OpenRouter request failed: %s", exc)
             raise OpenRouterRequestError("OpenRouter request failed") from exc
 
         if not isinstance(data, dict):
             raise OpenRouterResponseError("OpenRouter response must be a JSON object")
+        logger.info("OpenRouter request completed successfully")
         return data
 
     @staticmethod

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import argparse
 import logging
-import signal
 import sys
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 if __package__ in {None, ""}:
@@ -24,6 +24,14 @@ from app.telegram import TelegramPublisher
 logger = logging.getLogger(__name__)
 
 STARTUP_TEST_ARGS = ("tests", "-q")
+
+
+@dataclass(frozen=True)
+class ApplicationRuntime:
+    """Runtime dependencies that need to stay alive while the app runs."""
+
+    scheduler: object
+    telegram_publisher: TelegramPublisher
 
 
 def configure_logging(log_level: str) -> None:
@@ -70,6 +78,29 @@ def build_scheduler(settings: Settings):
     return create_scheduler(job, settings.publish_interval_minutes)
 
 
+def build_runtime(settings: Settings) -> ApplicationRuntime:
+    """Initialize infrastructure and register scheduled and manual publication entrypoints."""
+
+    validate_runtime_settings(settings)
+    init_db()
+
+    repository = PostRepository()
+    ai_client = AIClient(settings)
+    telegram_publisher = TelegramPublisher(settings)
+
+    scheduled_job = lambda: create_and_publish_post(ai_client, telegram_publisher, repository)
+    manual_job = lambda progress: create_and_publish_post(
+        ai_client,
+        telegram_publisher,
+        repository,
+        progress_callback=progress,
+    )
+    telegram_publisher.register_manual_publish_handler(manual_job)
+
+    scheduler = create_scheduler(scheduled_job, settings.publish_interval_minutes)
+    return ApplicationRuntime(scheduler=scheduler, telegram_publisher=telegram_publisher)
+
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     """Parse application command-line arguments."""
 
@@ -93,7 +124,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
 
     try:
-        scheduler = build_scheduler(settings)
+        runtime = build_runtime(settings)
     except Exception as exc:
         logger.error("Application startup failed: %s", exc)
         return 1
@@ -102,24 +133,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         logger.info("Runtime check completed successfully")
         return 0
 
-    scheduler.start()
+    runtime.scheduler.start()
     logger.info("Scheduler started with %s minute interval", settings.publish_interval_minutes)
+    logger.info("Telegram bot manual publication controls started")
 
-    stop_event = signal.pause if hasattr(signal, "pause") else None
     try:
-        if stop_event is not None:
-            while True:
-                stop_event()
-        else:
-            import time
-
-            while True:
-                time.sleep(3600)
+        runtime.telegram_publisher.start_manual_polling()
     except (KeyboardInterrupt, SystemExit):
         logger.info("Stopping application")
+        return 0
+    except Exception as exc:
+        logger.error("Telegram bot manual controls stopped with error: %s", exc)
+        return 1
     finally:
-        scheduler.shutdown(wait=False)
-    return 0
+        runtime.scheduler.shutdown(wait=False)
 
 
 if __name__ == "__main__":

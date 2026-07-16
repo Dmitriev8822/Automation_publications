@@ -100,7 +100,14 @@ def test_main_does_not_start_scheduler_when_startup_tests_fail(monkeypatch: pyte
     monkeypatch.setattr(app_main, "get_settings", lambda: DummySettings())
     monkeypatch.setattr(app_main, "configure_logging", lambda log_level: None)
     monkeypatch.setattr(app_main, "run_startup_tests", lambda: False)
-    monkeypatch.setattr(app_main, "build_scheduler", lambda settings: dummy_scheduler)
+    monkeypatch.setattr(
+        app_main,
+        "build_runtime",
+        lambda settings: app_main.ApplicationRuntime(
+            scheduler=dummy_scheduler,
+            telegram_publisher=object(),
+        ),
+    )
 
     assert app_main.main() == 1
     assert dummy_scheduler.started is False
@@ -117,7 +124,7 @@ def test_main_returns_error_when_dependency_setup_fails(monkeypatch: pytest.Monk
     monkeypatch.setattr(app_main, "run_startup_tests", lambda: True)
     monkeypatch.setattr(
         app_main,
-        "build_scheduler",
+        "build_runtime",
         lambda settings: (_ for _ in ()).throw(ValueError("bad runtime settings")),
     )
 
@@ -145,7 +152,14 @@ def test_main_check_mode_initializes_dependencies_without_starting_scheduler(mon
     monkeypatch.setattr(app_main, "get_settings", lambda: DummySettings())
     monkeypatch.setattr(app_main, "configure_logging", lambda log_level: None)
     monkeypatch.setattr(app_main, "run_startup_tests", lambda: True)
-    monkeypatch.setattr(app_main, "build_scheduler", lambda settings: dummy_scheduler)
+    monkeypatch.setattr(
+        app_main,
+        "build_runtime",
+        lambda settings: app_main.ApplicationRuntime(
+            scheduler=dummy_scheduler,
+            telegram_publisher=object(),
+        ),
+    )
 
     assert app_main.main(["--check"]) == 0
     assert dummy_scheduler.started is False
@@ -166,3 +180,42 @@ def test_main_can_run_as_script_path_for_help() -> None:
     assert result.returncode == 0
     assert "Run the Telegram publication automation service" in result.stdout
     assert "ModuleNotFoundError" not in result.stderr
+
+
+def test_main_returns_error_when_manual_polling_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app import main as app_main
+
+    class DummySettings:
+        log_level = "INFO"
+        publish_interval_minutes = 1
+
+    class DummyScheduler:
+        started = False
+        shutdown_called = False
+
+        def start(self) -> None:
+            self.started = True
+
+        def shutdown(self, wait: bool = False) -> None:
+            self.shutdown_called = True
+
+    class DummyTelegramPublisher:
+        def start_manual_polling(self) -> None:
+            raise RuntimeError("bad telegram token")
+
+    dummy_scheduler = DummyScheduler()
+    monkeypatch.setattr(app_main, "get_settings", lambda: DummySettings())
+    monkeypatch.setattr(app_main, "configure_logging", lambda log_level: None)
+    monkeypatch.setattr(app_main, "run_startup_tests", lambda: True)
+    monkeypatch.setattr(
+        app_main,
+        "build_runtime",
+        lambda settings: app_main.ApplicationRuntime(
+            scheduler=dummy_scheduler,
+            telegram_publisher=DummyTelegramPublisher(),
+        ),
+    )
+
+    assert app_main.main() == 1
+    assert dummy_scheduler.started is True
+    assert dummy_scheduler.shutdown_called is True
