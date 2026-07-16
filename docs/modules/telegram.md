@@ -61,3 +61,15 @@ from app.telegram import TelegramPublisher
 telegram_publisher = TelegramPublisher()
 message_id = telegram_publisher.publish_post(generated_post, image)
 ```
+
+## Используемые настройки
+
+См. описание выше в этом документе.
+
+## Взаимодействие с другими модулями
+
+См. описание выше в этом документе.
+
+## Обработка ошибок
+
+См. описание выше в этом документе.
