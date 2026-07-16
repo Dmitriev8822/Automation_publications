@@ -10,7 +10,7 @@
 - `SessionLocal` — фабрика сессий SQLAlchemy для работы приложения.
 - `Base` — базовый класс декларативных SQLAlchemy-моделей.
 - `PostRecord` — ORM-модель таблицы `posts`.
-- `init_db() -> None` — создаёт таблицы в БД, если они ещё не существуют.
+- `init_db() -> None` — создаёт каталог для файловой SQLite-БД и таблицы, если они ещё не существуют.
 - `PostRepository` — репозиторий для бизнес-логики без прямого доступа к SQLAlchemy.
   - `is_published(source_url: str) -> bool` — возвращает `True`, если URL уже имеет статус `published`.
   - `save_generated(post: GeneratedPost) -> PublishedPost` — сохраняет новый сгенерированный пост со статусом `generated`.
@@ -20,7 +20,7 @@
 
 ## Используемые настройки
 
-Модуль использует `app.config.get_settings()` и настройку `DATABASE_URL`. Значение по умолчанию для локальной разработки — SQLite-файл `sqlite:///./automation_publications.db`.
+Модуль использует `app.config.get_settings()` и настройку `DATABASE_URL`. Значение по умолчанию для локальной разработки — SQLite-файл `sqlite:///./data/publications.db`.
 
 ## Взаимодействие с другими модулями
 
