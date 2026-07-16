@@ -35,7 +35,7 @@ Enum жизненного цикла публикации:
 | Поле | Тип | Описание |
 | --- | --- | --- |
 | `title` | `str` | Заголовок поста. |
-| `text` | `str` | Непустой текст Telegram-поста. |
+| `text` | `str` | Непустой и не состоящий только из пробелов текст Telegram-поста. |
 | `image_prompt` | `str` | Промпт для генерации изображения. |
 | `source_url` | `AnyUrl` | Ссылка на исходную новость. |
 
@@ -83,7 +83,7 @@ from app.schemas import News, GeneratedPost, ImageAsset, PublishedPost, PostStat
 Правила валидации:
 
 - `News.source_url`, `GeneratedPost.source_url` и `PublishedPost.source_url` обязательны и должны быть корректными URL;
-- `GeneratedPost.text` должен содержать минимум один символ;
+- `GeneratedPost.text` должен содержать минимум один непробельный символ;
 - `ImageAsset` должен содержать хотя бы одно из полей `data`, `url` или `file_path`;
 - `PublishedPost.status` должен быть одним из значений `PostStatus`.
 

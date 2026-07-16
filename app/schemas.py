@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import Enum
 from pathlib import Path
 
-from pydantic import AnyUrl, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AnyUrl, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class PostStatus(str, Enum):
@@ -34,6 +34,14 @@ class GeneratedPost(BaseModel):
     text: str = Field(..., min_length=1)
     image_prompt: str
     source_url: AnyUrl
+
+    @field_validator("text")
+    @classmethod
+    def text_must_not_be_blank(cls, value: str) -> str:
+        """Require meaningful non-whitespace post text."""
+        if not value.strip():
+            raise ValueError("GeneratedPost text must not be empty")
+        return value
 
 
 class ImageAsset(BaseModel):
