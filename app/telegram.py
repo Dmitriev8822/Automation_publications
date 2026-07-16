@@ -9,12 +9,14 @@ from pathlib import Path
 from typing import Any, Protocol
 
 import telebot
+from telebot.apihelper import ApiTelegramException
 from telebot import types
 
 from app.config import Settings, get_settings
 from app.schemas import GeneratedPost, ImageAsset
 
 MANUAL_PUBLISH_BUTTON_TEXT = "📰 Опубликовать новость"
+TELEGRAM_UNAUTHORIZED_CODE = 401
 
 
 class TelegramBotProtocol(Protocol):
@@ -110,13 +112,26 @@ class TelegramPublisher:
     def start_manual_polling(self) -> None:
         """Start polling for manual publication commands."""
 
-        self.bot.infinity_polling(skip_pending=True)
+        try:
+            self.bot.infinity_polling(skip_pending=True)
+        except ApiTelegramException as exc:
+            if self._is_unauthorized_error(exc):
+                raise RuntimeError(
+                    "Telegram bot polling failed: Telegram API returned 401 Unauthorized. "
+                    "Check TELEGRAM_BOT_TOKEN: it must be the exact token issued by @BotFather "
+                    "in the '<bot_id>:<secret>' format, without quotes or extra spaces."
+                ) from exc
+            raise RuntimeError(f"Telegram bot polling failed: {exc}") from exc
 
     @staticmethod
     def _require_setting(value: str | None, error_message: str) -> str:
         if not value:
             raise ValueError(error_message)
-        return value
+        return value.strip()
+
+    @staticmethod
+    def _is_unauthorized_error(exc: ApiTelegramException) -> bool:
+        return getattr(exc, "error_code", None) == TELEGRAM_UNAUTHORIZED_CODE
 
     @staticmethod
     def _photo_payload(image: ImageAsset):

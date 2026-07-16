@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 
 import pytest
+from telebot.apihelper import ApiTelegramException
 
 from app.config import Settings
 from app.schemas import GeneratedPost, ImageAsset
@@ -18,8 +19,9 @@ class FakeMessage:
 
 
 class FakeBot:
-    def __init__(self, *, fail: bool = False) -> None:
+    def __init__(self, *, fail: bool = False, polling_error: Exception | None = None) -> None:
         self.fail = fail
+        self.polling_error = polling_error
         self.sent_messages: list[dict] = []
         self.sent_photos: list[dict] = []
         self.handlers: list[dict] = []
@@ -45,6 +47,8 @@ class FakeBot:
         return decorator
 
     def infinity_polling(self, **kwargs):
+        if self.polling_error is not None:
+            raise self.polling_error
         self.polling_started = True
         self.polling_kwargs = kwargs
 
@@ -192,3 +196,16 @@ def test_start_manual_polling_delegates_to_bot() -> None:
 
     assert bot.polling_started is True
     assert bot.polling_kwargs == {"skip_pending": True}
+
+
+def test_start_manual_polling_reports_invalid_token_clearly() -> None:
+    error = ApiTelegramException(
+        "getUpdates",
+        object(),
+        {"ok": False, "error_code": 401, "description": "Unauthorized"},
+    )
+    bot = FakeBot(polling_error=error)
+    publisher = TelegramPublisher(settings=make_settings(), bot=bot)
+
+    with pytest.raises(RuntimeError, match="Check TELEGRAM_BOT_TOKEN"):
+        publisher.start_manual_polling()

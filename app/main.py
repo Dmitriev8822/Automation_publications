@@ -141,9 +141,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         runtime.telegram_publisher.start_manual_polling()
     except (KeyboardInterrupt, SystemExit):
         logger.info("Stopping application")
+        return 0
+    except Exception as exc:
+        logger.error("Telegram bot manual controls stopped with error: %s", exc)
+        return 1
     finally:
         runtime.scheduler.shutdown(wait=False)
-    return 0
 
 
 if __name__ == "__main__":
