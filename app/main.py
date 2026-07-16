@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import logging
 import signal
 import sys
@@ -56,9 +57,22 @@ def build_scheduler(settings: Settings):
     return create_scheduler(job, settings.publish_interval_minutes)
 
 
-def main() -> int:
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    """Parse application command-line arguments."""
+
+    parser = argparse.ArgumentParser(description="Run the Telegram publication automation service.")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="validate settings, run startup tests, initialize dependencies, then exit without starting the scheduler",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
     """Run the application until interrupted."""
 
+    args = parse_args(argv if argv is not None else [])
     settings = get_settings()
     configure_logging(settings.log_level)
 
@@ -66,6 +80,10 @@ def main() -> int:
         return 1
 
     scheduler = build_scheduler(settings)
+    if args.check:
+        logger.info("Runtime check completed successfully")
+        return 0
+
     scheduler.start()
     logger.info("Scheduler started with %s minute interval", settings.publish_interval_minutes)
 
@@ -87,4 +105,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))
