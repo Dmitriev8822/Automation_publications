@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import logging
 from collections.abc import Mapping
@@ -43,6 +45,7 @@ class ImageResponse(BaseModel):
     """Structured response expected for image generation."""
 
     data: str | None = None
+    base64_data: str | None = None
     url: str | None = None
     file_path: str | None = None
     mime_type: str = "image/png"
@@ -136,7 +139,7 @@ class AIClient:
         try:
             image = ImageResponse.model_validate(payload)
             return ImageAsset(
-                data=image.data.encode("utf-8") if image.data else None,
+                data=self._decode_image_data(image.data or image.base64_data),
                 url=image.url,
                 file_path=image.file_path,
                 mime_type=image.mime_type,
@@ -233,6 +236,22 @@ class AIClient:
             raise OpenRouterResponseError("OpenRouter response does not contain a message")
         return message.get("content")
 
+    @staticmethod
+    def _decode_image_data(value: str | None) -> bytes | None:
+        if value is None:
+            return None
+        image_data = value.strip()
+        if not image_data:
+            return None
+        if image_data.startswith("data:"):
+            _, separator, image_data = image_data.partition(",")
+            if not separator:
+                raise OpenRouterResponseError("OpenRouter returned an invalid data URL for image")
+        try:
+            return base64.b64decode(image_data, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise OpenRouterResponseError("OpenRouter image data must be base64-encoded bytes") from exc
+
     def _news_system_prompt(self) -> str:
         return "Return only JSON. You are a news editor selecting fresh, reliable and publication-ready news."
 
@@ -257,12 +276,17 @@ class AIClient:
         )
 
     def _image_system_prompt(self) -> str:
-        return "Return only JSON. Create an image asset or reusable image prompt for a Telegram publication."
+        return (
+            "Return only JSON. Create a real image asset for a Telegram publication. "
+            "Do not return a text-only prompt as the image."
+        )
 
     @staticmethod
     def _image_user_prompt(post: GeneratedPost) -> str:
         return (
             f"Generate a safe editorial image asset for this post. Title: {post.title}. "
             f"Text: {post.text}. Preferred prompt: {post.image_prompt}. "
-            "Return one of data, url, or file_path plus mime_type."
+            "Return an object with either base64_data containing base64-encoded image bytes, "
+            "a direct HTTPS image url, or file_path, plus mime_type. "
+            "Do not return only a rewritten prompt."
         )
