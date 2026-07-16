@@ -18,11 +18,14 @@ def create_scheduler(job_func: Callable[[], Any], interval_minutes: int) -> Back
     failed publication attempt does not stop future scheduled runs.
     """
 
+    logger.info("Creating background scheduler: interval_minutes=%s", interval_minutes)
     scheduler = BackgroundScheduler()
 
     def protected_job() -> None:
+        logger.info("Scheduled publication job started")
         try:
             job_func()
+            logger.info("Scheduled publication job finished")
         except Exception:
             logger.exception("Scheduled publication job failed")
 
@@ -36,4 +39,5 @@ def create_scheduler(job_func: Callable[[], Any], interval_minutes: int) -> Back
         max_instances=1,
         coalesce=True,
     )
+    logger.info("Scheduled publication job registered: id=publish_post interval_minutes=%s", interval_minutes)
     return scheduler

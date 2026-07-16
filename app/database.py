@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
@@ -12,6 +13,8 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sess
 
 from app.config import get_settings
 from app.schemas import GeneratedPost, PostStatus, PublishedPost
+
+logger = logging.getLogger(__name__)
 
 
 def _utc_now() -> datetime:
@@ -53,14 +56,18 @@ def _ensure_sqlite_parent_dir(database_url: str) -> None:
     if url.database in {":memory:", ""}:
         return
 
-    Path(url.database).expanduser().parent.mkdir(parents=True, exist_ok=True)
+    path = Path(url.database).expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    logger.info("Ensured SQLite parent directory exists: %s", path.parent)
 
 
 def init_db() -> None:
     """Create database tables for the configured engine."""
 
+    logger.info("Initializing database: url=%s", settings.database_url)
     _ensure_sqlite_parent_dir(settings.database_url)
     Base.metadata.create_all(bind=engine)
+    logger.info("Database tables are ready")
 
 
 class PostRepository:
@@ -71,11 +78,15 @@ class PostRepository:
 
     def is_published(self, source_url: str) -> bool:
         with self._session_factory() as session:
+            logger.info("Checking whether source is published: %s", source_url)
             record = self._get_record(session, source_url)
-            return record is not None and record.status == PostStatus.PUBLISHED.value
+            is_published = record is not None and record.status == PostStatus.PUBLISHED.value
+            logger.info("Publication status checked: source_url=%s is_published=%s", source_url, is_published)
+            return is_published
 
     def save_generated(self, post: GeneratedPost) -> PublishedPost:
         with self._session_factory() as session:
+            logger.info("Saving generated post: source_url=%s", post.source_url)
             record = PostRecord(
                 source_url=str(post.source_url),
                 title=post.title,
@@ -85,10 +96,12 @@ class PostRepository:
             session.add(record)
             session.commit()
             session.refresh(record)
+            logger.info("Generated post saved: id=%s source_url=%s", record.id, record.source_url)
             return self._to_schema(record)
 
     def mark_published(self, source_url: str, telegram_message_id: int) -> PublishedPost:
         with self._session_factory() as session:
+            logger.info("Marking post as published: source_url=%s message_id=%s", source_url, telegram_message_id)
             record = self._require_record(session, source_url)
             record.status = PostStatus.PUBLISHED.value
             record.telegram_message_id = telegram_message_id
@@ -96,20 +109,24 @@ class PostRepository:
             record.updated_at = _utc_now()
             session.commit()
             session.refresh(record)
+            logger.info("Post marked as published: id=%s source_url=%s", record.id, record.source_url)
             return self._to_schema(record)
 
     def mark_failed(self, source_url: str, error_message: str) -> PublishedPost:
         with self._session_factory() as session:
+            logger.info("Marking post as failed: source_url=%s error=%s", source_url, error_message)
             record = self._require_record(session, source_url)
             record.status = PostStatus.FAILED.value
             record.error_message = error_message
             record.updated_at = _utc_now()
             session.commit()
             session.refresh(record)
+            logger.info("Post marked as failed: id=%s source_url=%s", record.id, record.source_url)
             return self._to_schema(record)
 
     def get_by_source_url(self, source_url: str) -> PublishedPost | None:
         with self._session_factory() as session:
+            logger.info("Loading post by source_url: %s", source_url)
             record = self._get_record(session, source_url)
             return self._to_schema(record) if record else None
 

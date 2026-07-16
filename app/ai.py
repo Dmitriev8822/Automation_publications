@@ -53,6 +53,7 @@ class AIClient:
 
     def __init__(self, settings: Settings | None = None, http_client: HTTPClient | None = None) -> None:
         self.settings = settings or get_settings()
+        self.last_error_message: str | None = None
         if http_client is not None:
             self.http_client = http_client
         else:
@@ -70,7 +71,15 @@ class AIClient:
         """
 
         try:
-            logger.info("Requesting fresh news from OpenRouter")
+            self.last_error_message = None
+            logger.info(
+                "Requesting fresh news from OpenRouter: endpoint=%s model=%s topic=%r max_items=%s api_key_configured=%s",
+                self.settings.chat_completions_url,
+                self.settings.openrouter_model,
+                self.settings.news_topic,
+                self.settings.max_news_items,
+                bool(self.settings.openrouter_api_key),
+            )
             payload = self._chat_json(
                 system_prompt=self._news_system_prompt(),
                 user_prompt=self._news_user_prompt(),
@@ -79,6 +88,7 @@ class AIClient:
             )
             response = NewsListResponse.model_validate(payload)
         except (AIClientError, ValidationError, TypeError, ValueError) as exc:
+            self.last_error_message = str(exc) or exc.__class__.__name__
             logger.warning("Could not fetch fresh news from OpenRouter: %s", exc)
             return []
 
@@ -88,7 +98,12 @@ class AIClient:
     def generate_post(self, news: News) -> GeneratedPost:
         """Generate a Telegram post from one news item."""
 
-        logger.info("Requesting Telegram post generation from OpenRouter")
+        logger.info(
+            "Requesting Telegram post generation from OpenRouter: source_url=%s model=%s max_length=%s",
+            news.source_url,
+            self.settings.openrouter_model,
+            self.settings.post_max_length,
+        )
         payload = self._chat_json(
             system_prompt=self._post_system_prompt(),
             user_prompt=self._post_user_prompt(news),
@@ -108,9 +123,10 @@ class AIClient:
         """Generate an image asset, or None when image generation is disabled."""
 
         if not self.settings.enable_image_generation:
+            logger.info("Image generation is disabled by ENABLE_IMAGE_GENERATION=false")
             return None
 
-        logger.info("Requesting image generation from OpenRouter")
+        logger.info("Requesting image generation from OpenRouter: source_url=%s", post.source_url)
         payload = self._chat_json(
             system_prompt=self._image_system_prompt(),
             user_prompt=self._image_user_prompt(post),
@@ -147,6 +163,12 @@ class AIClient:
         if not self.settings.openrouter_api_key:
             raise OpenRouterRequestError("OPENROUTER_API_KEY is required for OpenRouter requests")
 
+        logger.info(
+            "Sending OpenRouter chat completion request: endpoint=%s model=%s schema=%s",
+            self.settings.chat_completions_url,
+            self.settings.openrouter_model,
+            schema_name,
+        )
         request_payload = {
             "model": self.settings.openrouter_model,
             "messages": [
@@ -169,12 +191,18 @@ class AIClient:
                 response.raise_for_status()
             data = response.json() if hasattr(response, "json") else response
         except Exception as exc:  # noqa: BLE001 - normalize third-party/client errors for callers
-            logger.warning("OpenRouter request failed: %s", exc)
+            logger.warning(
+                "OpenRouter request failed: endpoint=%s model=%s schema=%s error=%s",
+                self.settings.chat_completions_url,
+                self.settings.openrouter_model,
+                schema_name,
+                exc,
+            )
             raise OpenRouterRequestError("OpenRouter request failed") from exc
 
         if not isinstance(data, dict):
             raise OpenRouterResponseError("OpenRouter response must be a JSON object")
-        logger.info("OpenRouter request completed successfully")
+        logger.info("OpenRouter request completed successfully: schema=%s", schema_name)
         return data
 
     @staticmethod

@@ -25,8 +25,16 @@ def make_post(index: int = 1) -> GeneratedPost:
 
 
 class FakeAIClient:
-    def __init__(self, news: list[News], *, fail_post: bool = False, fail_image: bool = False) -> None:
+    def __init__(
+        self,
+        news: list[News],
+        *,
+        fail_post: bool = False,
+        fail_image: bool = False,
+        last_error_message: str | None = None,
+    ) -> None:
         self.news = news
+        self.last_error_message = last_error_message
         self.fail_post = fail_post
         self.fail_image = fail_image
         self.generated_posts: list[News] = []
@@ -202,3 +210,21 @@ def test_telegram_error_marks_failed() -> None:
 
     assert repository.failed == [("https://example.com/news/1", "telegram failed")]
     assert repository.published == []
+
+
+def test_reports_ai_fetch_error_when_news_list_is_empty() -> None:
+    progress_messages: list[str] = []
+
+    result = create_and_publish_post(
+        FakeAIClient([], last_error_message="OpenRouter request failed"),
+        FakeTelegramPublisher(),
+        FakeRepository(),
+        progress_callback=progress_messages.append,
+    )
+
+    assert result is None
+    assert progress_messages == [
+        "🔎 Ищу свежие новости через OpenRouter...",
+        "⚠️ OpenRouter не вернул новости из-за ошибки: OpenRouter request failed",
+        "ℹ️ Свежих неопубликованных новостей не найдено.",
+    ]

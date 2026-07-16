@@ -67,9 +67,11 @@ def run_startup_tests(args: Sequence[str] = STARTUP_TEST_ARGS) -> bool:
 def build_scheduler(settings: Settings):
     """Initialize infrastructure and return a configured scheduler."""
 
+    logger.info("Building runtime dependencies")
     validate_runtime_settings(settings)
     init_db()
 
+    logger.info("Creating PostRepository, AIClient and TelegramPublisher")
     repository = PostRepository()
     ai_client = AIClient(settings)
     telegram_publisher = TelegramPublisher(settings)
@@ -81,9 +83,11 @@ def build_scheduler(settings: Settings):
 def build_runtime(settings: Settings) -> ApplicationRuntime:
     """Initialize infrastructure and register scheduled and manual publication entrypoints."""
 
+    logger.info("Building runtime dependencies")
     validate_runtime_settings(settings)
     init_db()
 
+    logger.info("Creating PostRepository, AIClient and TelegramPublisher")
     repository = PostRepository()
     ai_client = AIClient(settings)
     telegram_publisher = TelegramPublisher(settings)
@@ -97,6 +101,7 @@ def build_runtime(settings: Settings) -> ApplicationRuntime:
     )
     telegram_publisher.register_manual_publish_handler(manual_job)
 
+    logger.info("Creating scheduler with interval_minutes=%s", settings.publish_interval_minutes)
     scheduler = create_scheduler(scheduled_job, settings.publish_interval_minutes)
     return ApplicationRuntime(scheduler=scheduler, telegram_publisher=telegram_publisher)
 

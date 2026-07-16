@@ -20,6 +20,11 @@ class FakeResponse:
         return self.payload
 
 
+class FailingHTTPClient:
+    def post(self, url: str, **kwargs):
+        raise RuntimeError("401 Unauthorized")
+
+
 class FakeHTTPClient:
     def __init__(self, contents: list[object]) -> None:
         self.contents = contents
@@ -142,3 +147,10 @@ def test_generate_image_parses_url_asset() -> None:
     assert str(image.url) == "https://example.com/image.png"
     assert image.mime_type == "image/png"
     assert len(http_client.requests) == 1
+
+
+def test_find_fresh_news_stores_error_message_on_request_failure() -> None:
+    client = AIClient(settings=make_settings(), http_client=FailingHTTPClient())
+
+    assert client.find_fresh_news() == []
+    assert client.last_error_message == "OpenRouter request failed"
