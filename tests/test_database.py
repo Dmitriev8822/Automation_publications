@@ -6,7 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.database import Base, PostRecord, PostRepository
+from app.database import Base, PostRecord, PostRepository, _ensure_sqlite_parent_dir
 from app.schemas import GeneratedPost, PostStatus
 
 
@@ -117,3 +117,11 @@ def test_get_by_source_url(repository, generated_post):
     assert found is not None
     assert found.status is PostStatus.GENERATED
     assert repo.get_by_source_url("https://example.com/news/missing") is None
+
+
+def test_ensure_sqlite_parent_dir_creates_missing_directory(tmp_path):
+    db_path = tmp_path / "nested" / "publications.db"
+
+    _ensure_sqlite_parent_dir(f"sqlite:///{db_path}")
+
+    assert db_path.parent.is_dir()

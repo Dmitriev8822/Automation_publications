@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Callable
 
 from sqlalchemy import DateTime, Integer, String, Text, create_engine, select
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 from app.config import get_settings
@@ -41,9 +43,23 @@ class PostRecord(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utc_now, onupdate=_utc_now)
 
 
+def _ensure_sqlite_parent_dir(database_url: str) -> None:
+    """Create a parent directory for file-based SQLite databases."""
+
+    url = make_url(database_url)
+    if url.drivername != "sqlite" or not url.database:
+        return
+
+    if url.database in {":memory:", ""}:
+        return
+
+    Path(url.database).expanduser().parent.mkdir(parents=True, exist_ok=True)
+
+
 def init_db() -> None:
     """Create database tables for the configured engine."""
 
+    _ensure_sqlite_parent_dir(settings.database_url)
     Base.metadata.create_all(bind=engine)
 
 
