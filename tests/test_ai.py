@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 
 from app.ai import AIClient
@@ -159,6 +160,52 @@ def test_generate_image_parses_url_asset() -> None:
     assert str(image.url) == "https://example.com/image.png"
     assert image.mime_type == "image/png"
     assert len(http_client.requests) == 1
+
+
+def test_generate_image_decodes_base64_asset() -> None:
+    encoded = base64.b64encode(b"image-bytes").decode("ascii")
+    content = json.dumps(
+        {
+            "base64_data": encoded,
+            "mime_type": "image/png",
+        }
+    )
+    http_client = FakeHTTPClient([content])
+    client = AIClient(settings=make_settings(enable_image_generation=True), http_client=http_client)
+    post = GeneratedPost(
+        title="AI release",
+        text="Fresh Telegram-ready post",
+        image_prompt="Editorial illustration",
+        source_url="https://example.com/ai-release",
+    )
+
+    image = client.generate_image(post)
+
+    assert image is not None
+    assert image.data == b"image-bytes"
+    assert image.mime_type == "image/png"
+
+
+def test_generate_image_decodes_data_url_asset() -> None:
+    encoded = base64.b64encode(b"png-bytes").decode("ascii")
+    content = json.dumps(
+        {
+            "data": f"data:image/png;base64,{encoded}",
+            "mime_type": "image/png",
+        }
+    )
+    client = AIClient(settings=make_settings(enable_image_generation=True), http_client=FakeHTTPClient([content]))
+    post = GeneratedPost(
+        title="AI release",
+        text="Fresh Telegram-ready post",
+        image_prompt="Editorial illustration",
+        source_url="https://example.com/ai-release",
+    )
+
+    image = client.generate_image(post)
+
+    assert image is not None
+    assert image.data == b"png-bytes"
 
 
 def test_find_fresh_news_stores_error_message_on_request_failure() -> None:
