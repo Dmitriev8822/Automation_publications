@@ -36,6 +36,14 @@ def test_generated_post_text_must_not_be_empty() -> None:
             source_url="https://example.com/news",
         )
 
+    with pytest.raises(ValidationError):
+        GeneratedPost(
+            title="Title",
+            text="   ",
+            image_prompt="Image prompt",
+            source_url="https://example.com/news",
+        )
+
 
 def test_image_asset_requires_data_url_or_file_path() -> None:
     assert ImageAsset(data=b"image").data == b"image"

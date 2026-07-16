@@ -40,6 +40,11 @@ class Settings(BaseSettings):
         populate_by_name=True,
     )
 
+    @property
+    def chat_completions_url(self) -> str:
+        """OpenRouter chat completions endpoint derived from the base URL."""
+        return f"{str(self.openrouter_base_url).rstrip('/')}/chat/completions"
+
     @field_validator("app_env")
     @classmethod
     def normalize_app_env(cls, value: str) -> str:
