@@ -1,0 +1,7 @@
+openrouter
+pyTelegramBotAPI
+SQLAlchemy
+APScheduler
+pydantic
+pydantic-settings
+pytest
