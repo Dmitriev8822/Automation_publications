@@ -61,6 +61,10 @@ def create_and_publish_post(
     try:
         news = _find_first_unpublished_news(ai_client, repository)
         if news is None:
+            ai_error = getattr(ai_client, "last_error_message", None)
+            if ai_error:
+                _notify(progress_callback, f"⚠️ OpenRouter не вернул новости из-за ошибки: {ai_error}")
+                logger.warning("No fresh news returned because AI client reported an error: %s", ai_error)
             _notify(progress_callback, "ℹ️ Свежих неопубликованных новостей не найдено.")
             logger.info("No unpublished fresh news found")
             return None
@@ -99,10 +103,12 @@ def _find_first_unpublished_news(
     ai_client: AIClientProtocol,
     repository: PostRepositoryProtocol,
 ) -> News | None:
+    logger.info("Calling AI client to find fresh news")
     news_items = ai_client.find_fresh_news()
-    logger.info("Found %d fresh news items", len(news_items))
+    logger.info("AI client returned %d fresh news item(s)", len(news_items))
     for news in news_items:
         source_url = str(news.source_url)
+        logger.info("Checking publication status in repository: %s", source_url)
         if repository.is_published(source_url):
             logger.info("Skipping already published news source: %s", source_url)
             continue

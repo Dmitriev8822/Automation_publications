@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from contextlib import nullcontext
 from collections.abc import Callable
 from io import BytesIO
@@ -17,6 +18,8 @@ from app.schemas import GeneratedPost, ImageAsset
 
 MANUAL_PUBLISH_BUTTON_TEXT = "📰 Опубликовать новость"
 TELEGRAM_UNAUTHORIZED_CODE = 401
+
+logger = logging.getLogger(__name__)
 
 
 class TelegramBotProtocol(Protocol):
@@ -56,10 +59,12 @@ class TelegramPublisher:
             "TELEGRAM_BOT_TOKEN is required to publish to Telegram",
         )
         self.bot = bot or telebot.TeleBot(token)
+        logger.info("TelegramPublisher initialized: channel_id=%s bot_injected=%s", self.channel_id, bot is not None)
 
     def publish_post(self, post: GeneratedPost, image: ImageAsset | None = None) -> int:
         """Publish a generated post with an optional image and return Telegram message id."""
 
+        logger.info("Publishing Telegram post: source_url=%s has_image=%s", post.source_url, image is not None)
         try:
             if image is None:
                 message = self.bot.send_message(chat_id=self.channel_id, text=post.text)
@@ -77,6 +82,7 @@ class TelegramPublisher:
         message_id = getattr(message, "message_id", None)
         if not isinstance(message_id, int):
             raise RuntimeError("Telegram publication failed: response does not contain message_id")
+        logger.info("Telegram post published successfully: message_id=%s", message_id)
         return message_id
 
     def register_manual_publish_handler(
@@ -84,6 +90,8 @@ class TelegramPublisher:
         publish_callback: Callable[[Callable[[str], None]], Any],
     ) -> None:
         """Register /start and button handlers for manual publication from the bot chat."""
+
+        logger.info("Registering Telegram manual publication handlers")
 
         @self.bot.message_handler(commands=["start"])
         def handle_start(message: Any) -> None:
@@ -115,6 +123,7 @@ class TelegramPublisher:
     def start_manual_polling(self) -> None:
         """Start polling for manual publication commands."""
 
+        logger.info("Starting Telegram bot infinity polling for manual controls")
         try:
             self.bot.infinity_polling(skip_pending=True)
         except ApiTelegramException as exc:
@@ -123,6 +132,7 @@ class TelegramPublisher:
     def validate_bot_token(self) -> str:
         """Validate bot token with Telegram getMe and return a readable bot name."""
 
+        logger.info("Validating Telegram bot token with getMe")
         try:
             bot_info = self.bot.get_me()
         except ApiTelegramException as exc:

@@ -90,3 +90,7 @@ if not repository.is_published(str(post.source_url)):
     repository.save_generated(post)
     repository.mark_published(str(post.source_url), telegram_message_id=1001)
 ```
+
+## Консольное логирование
+
+Модуль пишет INFO-логи при инициализации БД, создании директории SQLite, проверке дублей, сохранении `generated`, переводе в `published`, переводе в `failed` и загрузке записи по `source_url`. Эти сообщения помогают понять, дошёл ли бизнес-сценарий до БД и какой `source_url` проверяется или обновляется.
