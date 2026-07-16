@@ -1,0 +1,4 @@
+pyTelegramBotAPI
+pydantic
+pydantic-settings
+pytest
