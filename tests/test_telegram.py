@@ -52,6 +52,11 @@ class FakeBot:
         self.polling_started = True
         self.polling_kwargs = kwargs
 
+    def get_me(self):
+        if self.polling_error is not None:
+            raise self.polling_error
+        return SimpleNamespace(username="test_news_bot", first_name="Test News Bot")
+
 
 def make_settings(**overrides) -> Settings:
     defaults = {
@@ -209,3 +214,23 @@ def test_start_manual_polling_reports_invalid_token_clearly() -> None:
 
     with pytest.raises(RuntimeError, match="Check TELEGRAM_BOT_TOKEN"):
         publisher.start_manual_polling()
+
+
+def test_validate_bot_token_returns_bot_username() -> None:
+    bot = FakeBot()
+    publisher = TelegramPublisher(settings=make_settings(), bot=bot)
+
+    assert publisher.validate_bot_token() == "@test_news_bot"
+
+
+def test_validate_bot_token_reports_invalid_token_clearly() -> None:
+    error = ApiTelegramException(
+        "getMe",
+        object(),
+        {"ok": False, "error_code": 401, "description": "Unauthorized"},
+    )
+    bot = FakeBot(polling_error=error)
+    publisher = TelegramPublisher(settings=make_settings(), bot=bot)
+
+    with pytest.raises(RuntimeError, match="python app/main.py --check-telegram"):
+        publisher.validate_bot_token()

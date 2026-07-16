@@ -34,6 +34,9 @@ class TelegramBotProtocol(Protocol):
     def infinity_polling(self, **kwargs: Any) -> None:
         """Start long polling for incoming bot updates."""
 
+    def get_me(self) -> Any:
+        """Return information about the configured bot token."""
+
 
 class TelegramPublisher:
     """Publish generated posts and optional images to a Telegram channel."""
@@ -115,19 +118,42 @@ class TelegramPublisher:
         try:
             self.bot.infinity_polling(skip_pending=True)
         except ApiTelegramException as exc:
-            if self._is_unauthorized_error(exc):
-                raise RuntimeError(
-                    "Telegram bot polling failed: Telegram API returned 401 Unauthorized. "
-                    "Check TELEGRAM_BOT_TOKEN: it must be the exact token issued by @BotFather "
-                    "in the '<bot_id>:<secret>' format, without quotes or extra spaces."
-                ) from exc
-            raise RuntimeError(f"Telegram bot polling failed: {exc}") from exc
+            self._raise_telegram_api_error("Telegram bot polling failed", exc)
+
+    def validate_bot_token(self) -> str:
+        """Validate bot token with Telegram getMe and return a readable bot name."""
+
+        try:
+            bot_info = self.bot.get_me()
+        except ApiTelegramException as exc:
+            self._raise_telegram_api_error("Telegram bot token check failed", exc)
+        except Exception as exc:
+            raise RuntimeError(f"Telegram bot token check failed: {exc}") from exc
+
+        username = getattr(bot_info, "username", None)
+        first_name = getattr(bot_info, "first_name", None)
+        if username:
+            return f"@{username}"
+        if first_name:
+            return str(first_name)
+        return "<unknown bot>"
 
     @staticmethod
     def _require_setting(value: str | None, error_message: str) -> str:
         if not value:
             raise ValueError(error_message)
         return value.strip()
+
+    @classmethod
+    def _raise_telegram_api_error(cls, prefix: str, exc: ApiTelegramException) -> None:
+        if cls._is_unauthorized_error(exc):
+            raise RuntimeError(
+                f"{prefix}: Telegram API returned 401 Unauthorized. "
+                "Check TELEGRAM_BOT_TOKEN: it must be the exact token issued by @BotFather "
+                "in the '<bot_id>:<secret>' format, without quotes or extra spaces. "
+                "You can verify it with: python app/main.py --check-telegram"
+            ) from exc
+        raise RuntimeError(f"{prefix}: {exc}") from exc
 
     @staticmethod
     def _is_unauthorized_error(exc: ApiTelegramException) -> bool:

@@ -110,6 +110,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="validate settings, run startup tests, initialize dependencies, then exit without starting the scheduler",
     )
+    parser.add_argument(
+        "--check-telegram",
+        action="store_true",
+        help="validate TELEGRAM_BOT_TOKEN with Telegram getMe, then exit without starting the scheduler",
+    )
     return parser.parse_args(argv)
 
 
@@ -119,6 +124,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv if argv is not None else [])
     settings = get_settings()
     configure_logging(settings.log_level)
+
+    if args.check_telegram:
+        try:
+            telegram_publisher = TelegramPublisher(settings)
+            bot_name = telegram_publisher.validate_bot_token()
+        except Exception as exc:
+            logger.error("Telegram settings check failed: %s", exc)
+            return 1
+        logger.info(
+            "Telegram bot token is valid for %s; publication channel is %s",
+            bot_name,
+            telegram_publisher.channel_id,
+        )
+        return 0
 
     if not run_startup_tests():
         return 1

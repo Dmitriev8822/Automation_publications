@@ -219,3 +219,54 @@ def test_main_returns_error_when_manual_polling_fails(monkeypatch: pytest.Monkey
     assert app_main.main() == 1
     assert dummy_scheduler.started is True
     assert dummy_scheduler.shutdown_called is True
+
+
+def test_main_check_telegram_validates_token_without_startup_tests(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app import main as app_main
+
+    class DummySettings:
+        log_level = "INFO"
+
+    class DummyTelegramPublisher:
+        channel_id = "@test_channel"
+
+        def __init__(self, settings) -> None:
+            self.settings = settings
+
+        def validate_bot_token(self) -> str:
+            return "@test_news_bot"
+
+    startup_tests_called = False
+
+    def fake_startup_tests() -> bool:
+        nonlocal startup_tests_called
+        startup_tests_called = True
+        return True
+
+    monkeypatch.setattr(app_main, "get_settings", lambda: DummySettings())
+    monkeypatch.setattr(app_main, "configure_logging", lambda log_level: None)
+    monkeypatch.setattr(app_main, "run_startup_tests", fake_startup_tests)
+    monkeypatch.setattr(app_main, "TelegramPublisher", DummyTelegramPublisher)
+
+    assert app_main.main(["--check-telegram"]) == 0
+    assert startup_tests_called is False
+
+
+def test_main_check_telegram_returns_error_for_invalid_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app import main as app_main
+
+    class DummySettings:
+        log_level = "INFO"
+
+    class DummyTelegramPublisher:
+        def __init__(self, settings) -> None:
+            self.settings = settings
+
+        def validate_bot_token(self) -> str:
+            raise RuntimeError("bad token")
+
+    monkeypatch.setattr(app_main, "get_settings", lambda: DummySettings())
+    monkeypatch.setattr(app_main, "configure_logging", lambda log_level: None)
+    monkeypatch.setattr(app_main, "TelegramPublisher", DummyTelegramPublisher)
+
+    assert app_main.main(["--check-telegram"]) == 1
