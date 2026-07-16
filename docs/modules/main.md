@@ -19,6 +19,8 @@ CLI:
 ```bash
 python -m app.main
 python -m app.main --check
+python app/main.py
+python app/main.py --check
 ```
 
 ## Используемые настройки
@@ -46,6 +48,7 @@ python -m app.main --check
 
 ## Обработка ошибок
 
+- При прямом запуске `python app/main.py` модуль добавляет корень репозитория в `sys.path`, чтобы абсолютные импорты `app.*` работали так же, как при `python -m app.main`.
 - Если startup-тесты не прошли, `main()` возвращает `1` и не запускает scheduler.
 - Если production-секреты отсутствуют, `validate_runtime_settings()` выбрасывает `ValueError`, и приложение не стартует.
 - Если не удается создать Telegram/OpenRouter-зависимости, ошибка возникает на этапе `build_scheduler()` до запуска scheduler.
@@ -75,4 +78,6 @@ python -m app.main --check
 
 ```bash
 python -m app.main
+# или прямой запуск файла из корня репозитория
+python app/main.py
 ```
