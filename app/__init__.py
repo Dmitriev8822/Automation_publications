@@ -1,1 +1,1 @@
-"""Automation publications application package."""
+"""Application package for the Telegram publication automation service."""
