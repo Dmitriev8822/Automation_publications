@@ -120,6 +120,28 @@ def test_successful_full_scenario() -> None:
     assert len(publisher.published) == 1
 
 
+def test_successful_scenario_reports_progress() -> None:
+    progress_messages: list[str] = []
+
+    result = create_and_publish_post(
+        FakeAIClient([make_news()]),
+        FakeTelegramPublisher(),
+        FakeRepository(),
+        progress_callback=progress_messages.append,
+    )
+
+    assert result is not None
+    assert progress_messages == [
+        "🔎 Ищу свежие новости через OpenRouter...",
+        "✅ Новость найдена: News 1",
+        "✍️ Генерирую текст поста через OpenRouter...",
+        "💾 Сохраняю сгенерированный пост в БД...",
+        "🖼️ Проверяю/генерирую изображение...",
+        "📨 Публикую пост в Telegram...",
+        "✅ Пост опубликован. Telegram message_id=777",
+    ]
+
+
 def test_skips_already_published_news() -> None:
     first = make_news(1)
     second = make_news(2)
