@@ -83,7 +83,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not run_startup_tests():
         return 1
 
-    scheduler = build_scheduler(settings)
+    try:
+        scheduler = build_scheduler(settings)
+    except Exception as exc:
+        logger.error("Application startup failed: %s", exc)
+        return 1
+
     if args.check:
         logger.info("Runtime check completed successfully")
         return 0

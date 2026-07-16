@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from pathlib import Path
-
 from pydantic import AnyUrl, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
@@ -49,7 +47,7 @@ class ImageAsset(BaseModel):
 
     data: bytes | None = None
     url: AnyUrl | None = None
-    file_path: Path | None = None
+    file_path: str | None = None
     mime_type: str = "image/png"
 
     @model_validator(mode="after")

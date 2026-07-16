@@ -50,8 +50,8 @@ python app/main.py --check
 
 - При прямом запуске `python app/main.py` модуль добавляет корень репозитория в `sys.path`, чтобы абсолютные импорты `app.*` работали так же, как при `python -m app.main`.
 - Если startup-тесты не прошли, `main()` возвращает `1` и не запускает scheduler.
-- Если production-секреты отсутствуют, `validate_runtime_settings()` выбрасывает `ValueError`, и приложение не стартует.
-- Если не удается создать Telegram/OpenRouter-зависимости, ошибка возникает на этапе `build_scheduler()` до запуска scheduler.
+- Если production-секреты отсутствуют или Telegram-токен не похож на формат `<bot_id>:<secret>`, `validate_runtime_settings()` выбрасывает `ValueError`; `main()` логирует понятную ошибку старта и возвращает код `1` до создания Telegram-клиента.
+- Если не удается создать Telegram/OpenRouter-зависимости, ошибка возникает на этапе `build_scheduler()` до запуска scheduler; при CLI-запуске она превращается в лог `Application startup failed: ...` и код возврата `1`.
 - Ошибки внутри самой publication job логируются в `app.scheduler` и не останавливают будущие запуски.
 - При штатном `KeyboardInterrupt` или `SystemExit` scheduler останавливается через `shutdown(wait=False)`.
 
@@ -68,7 +68,7 @@ pytest
 
 ## Пример использования
 
-Проверка окружения после заполнения `.env`:
+Проверка окружения после заполнения `.env` (для реального запуска в `prod` нужны настоящий `OPENROUTER_API_KEY`, `TELEGRAM_BOT_TOKEN` формата `<bot_id>:<secret>` и `TELEGRAM_CHANNEL_ID`; без них сервис не сможет создать внешние клиенты):
 
 ```bash
 python -m app.main --check
