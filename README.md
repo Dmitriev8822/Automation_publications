@@ -88,7 +88,7 @@ README.md
 | `DATABASE_URL` | нет | SQLite URL, по умолчанию `sqlite:///./data/publications.db`. |
 | `PUBLISH_INTERVAL_MINUTES` | нет | Период публикаций в минутах, минимум `1`. |
 | `OPENROUTER_API_KEY` | да | API-ключ OpenRouter. |
-| `OPENROUTER_MODEL` | нет | Модель OpenRouter для поиска новостей и генерации постов. |
+| `OPENROUTER_MODEL` | нет | Модель OpenRouter для поиска новостей и генерации постов; по умолчанию `openai/gpt-4.1-mini`. |
 | `OPENROUTER_BASE_URL` | нет | Базовый URL OpenRouter API. |
 | `TELEGRAM_BOT_TOKEN` | да | Токен Telegram-бота от BotFather. |
 | `TELEGRAM_CHANNEL_ID` | да | Username канала вида `@channel_name` или числовой идентификатор. |

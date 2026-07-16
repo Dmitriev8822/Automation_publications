@@ -12,7 +12,7 @@ def test_default_values():
     assert settings.database_url == "sqlite:///./data/publications.db"
     assert settings.publish_interval_minutes == 30
     assert settings.openrouter_api_key is None
-    assert settings.openrouter_model == "openai/gpt-4o-mini"
+    assert settings.openrouter_model == "openai/gpt-4.1-mini"
     assert str(settings.openrouter_base_url).rstrip("/") == "https://openrouter.ai/api/v1"
     assert settings.telegram_bot_token is None
     assert settings.telegram_channel_id is None
