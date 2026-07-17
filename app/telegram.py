@@ -235,9 +235,19 @@ class TelegramPublisher:
         self._send_control_message(
             chat_id, "🧠 Формирую структурированный контент план..."
         )
-        plan = self._call_content_plan_generator(
-            generate_callback, description, dialog_context
-        )
+        try:
+            plan = self._call_content_plan_generator(
+                generate_callback, description, dialog_context
+            )
+        except Exception as exc:
+            logger.exception("Content plan generation failed for chat_id=%s", chat_id)
+            self._send_control_message(
+                chat_id,
+                "❌ Не удалось сформировать контент план. "
+                f"Проверьте настройки AI/OpenRouter и попробуйте еще раз. Ошибка: {exc}",
+                reply_markup=self._manual_publish_keyboard(),
+            )
+            return
         state.setdefault("dialog_context", []).append(
             f"ИИ предложил план: {plan.title} ({len(plan.items)} постов)"
         )
