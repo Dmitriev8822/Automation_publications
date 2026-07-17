@@ -73,7 +73,7 @@ def make_settings(**overrides) -> Settings:
         "telegram_channel_id": "@test_channel",
     }
     defaults.update(overrides)
-    return Settings(**defaults)
+    return Settings(**defaults, _env_file=None)
 
 
 def make_post() -> GeneratedPost:
