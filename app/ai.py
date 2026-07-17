@@ -7,6 +7,7 @@ import binascii
 import json
 import logging
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any, Protocol
 
 from pydantic import BaseModel, Field, ValidationError
@@ -138,10 +139,18 @@ class AIClient:
         )
         try:
             image = ImageResponse.model_validate(payload)
+            image_data = self._decode_image_data(image.data or image.base64_data)
+            file_path = self._validated_image_file_path(image.file_path)
+            if image_data is None and image.url is None and file_path is None:
+                logger.warning(
+                    "OpenRouter did not return a usable image asset for source_url=%s; publishing without image",
+                    post.source_url,
+                )
+                return None
             return ImageAsset(
-                data=self._decode_image_data(image.data or image.base64_data),
+                data=image_data,
                 url=image.url,
-                file_path=image.file_path,
+                file_path=file_path,
                 mime_type=image.mime_type,
             )
         except ValidationError as exc:
@@ -252,6 +261,18 @@ class AIClient:
         except (binascii.Error, ValueError) as exc:
             raise OpenRouterResponseError("OpenRouter image data must be base64-encoded bytes") from exc
 
+    @staticmethod
+    def _validated_image_file_path(value: str | None) -> str | None:
+        if value is None:
+            return None
+        file_path = value.strip()
+        if not file_path:
+            return None
+        if not Path(file_path).is_file():
+            logger.warning("Ignoring image file_path returned by OpenRouter because it does not exist: %s", file_path)
+            return None
+        return file_path
+
     def _news_system_prompt(self) -> str:
         return "Return only JSON. You are a news editor selecting fresh, reliable and publication-ready news."
 
@@ -286,7 +307,8 @@ class AIClient:
         return (
             f"Generate a safe editorial image asset for this post. Title: {post.title}. "
             f"Text: {post.text}. Preferred prompt: {post.image_prompt}. "
-            "Return an object with either base64_data containing base64-encoded image bytes, "
-            "a direct HTTPS image url, or file_path, plus mime_type. "
+            "Return an object with either base64_data containing base64-encoded image bytes "
+            "or a direct HTTPS image url, plus mime_type. Do not invent local file_path values: "
+            "file_path is only valid if the file already exists on the application host. "
             "Do not return only a rewritten prompt."
         )
