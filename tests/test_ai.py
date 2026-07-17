@@ -196,8 +196,13 @@ def test_generate_image_decodes_base64_asset() -> None:
     assert image.mime_type == "image/png"
 
 
-def test_generate_image_returns_none_on_empty_image_api_item() -> None:
-    content = {"data": [{}]}
+def test_generate_image_ignores_nonexistent_file_path_asset() -> None:
+    content = json.dumps(
+        {
+            "file_path": "assets/missing-generated-image.jpg",
+            "mime_type": "image/jpeg",
+        }
+    )
     client = AIClient(settings=make_settings(enable_image_generation=True), http_client=FakeHTTPClient([content]))
     post = GeneratedPost(
         title="AI release",
