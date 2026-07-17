@@ -429,7 +429,9 @@ def test_content_plan_dialog_reports_generation_error_without_reraising() -> Non
     bot = FakeBot()
     publisher = TelegramPublisher(settings=make_settings(), bot=bot)
 
-    def fail_generate(description: str, context: list[str] | None = None) -> ContentPlan:
+    def fail_generate(
+        description: str, context: list[str] | None = None
+    ) -> ContentPlan:
         raise RuntimeError("OpenRouter request failed")
 
     publisher.register_content_plan_handler(fail_generate, lambda plan: None)
@@ -464,3 +466,85 @@ def test_publication_approval_handler_matches_persisted_string_chat_id() -> None
 
     assert rejected == [42]
     assert bot.sent_messages[-1]["text"] == "❌ Публикация отменена."
+
+
+from app.telegram import BACK_BUTTON_TEXT, CANCEL_BUTTON_TEXT, MENU_BUTTON_TEXT
+
+
+def test_content_plan_dialog_back_returns_to_description_step() -> None:
+    bot = FakeBot()
+    publisher = TelegramPublisher(settings=make_settings(), bot=bot)
+    calls: list[tuple[str, list[str]]] = []
+
+    def generate(description: str, context: list[str] | None = None) -> ContentPlan:
+        calls.append((description, list(context or [])))
+        return make_plan()
+
+    publisher.register_content_plan_handler(generate, lambda plan: None)
+
+    dispatch_text(bot, 555, CONTENT_PLAN_BUTTON_TEXT)
+    dispatch_text(bot, 555, "первый план")
+    dispatch_text(bot, 555, BACK_BUTTON_TEXT)
+    dispatch_text(bot, 555, "новый план")
+
+    assert calls[0] == ("первый план", [])
+    assert calls[1] == ("новый план", [])
+    assert "Вернулись на шаг описания" in bot.sent_messages[-3]["text"]
+
+
+def test_content_plan_dialog_cancel_returns_main_menu_without_approval() -> None:
+    bot = FakeBot()
+    publisher = TelegramPublisher(settings=make_settings(), bot=bot)
+    approved: list[ContentPlan] = []
+
+    publisher.register_content_plan_handler(
+        lambda description, context=None: make_plan(), approved.append
+    )
+
+    dispatch_text(bot, 555, CONTENT_PLAN_BUTTON_TEXT)
+    dispatch_text(bot, 555, CANCEL_BUTTON_TEXT)
+
+    assert approved == []
+    assert "Диалог контент-плана отменен" in bot.sent_messages[-1]["text"]
+    assert bot.sent_messages[-1]["reply_markup"] is not None
+
+
+def test_reminders_dialog_cancel_returns_main_menu_without_saving() -> None:
+    bot = FakeBot()
+    publisher = TelegramPublisher(settings=make_settings(), bot=bot)
+    configured: list[tuple[int | None, int | str]] = []
+
+    publisher.register_reminders_handler(
+        lambda minutes, chat_id: configured.append((minutes, chat_id))
+    )
+
+    dispatch_text(bot, 777, REMINDERS_BUTTON_TEXT)
+    dispatch_text(bot, 777, MENU_BUTTON_TEXT)
+
+    assert configured == []
+    assert publisher.reminder_minutes_before is None
+    assert "Настройка напоминаний отменена" in bot.sent_messages[-1]["text"]
+    assert bot.sent_messages[-1]["reply_markup"] is not None
+
+
+def test_publication_approval_cancel_closes_pending_item_without_callback() -> None:
+    bot = FakeBot()
+    publisher = TelegramPublisher(settings=make_settings(), bot=bot)
+    approved: list[int] = []
+    rejected: list[int] = []
+
+    publisher.register_publication_approval_handler(
+        approved.append,
+        rejected.append,
+        lambda item_id: make_plan().items[0],
+        lambda item_id: make_plan().items[0],
+    )
+
+    publisher.send_publication_reminder(777, 42, make_plan().items[0])
+    dispatch_text(bot, 777, CANCEL_BUTTON_TEXT)
+    dispatch_text(bot, 777, APPROVE_REMINDER_BUTTON_TEXT)
+
+    assert approved == []
+    assert rejected == []
+    assert "Решение по напоминанию закрыто" in bot.sent_messages[-2]["text"]
+    assert bot.sent_messages[-1]["text"] == "Нет поста, ожидающего решения."

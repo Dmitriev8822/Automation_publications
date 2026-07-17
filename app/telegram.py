@@ -19,6 +19,9 @@ from app.schemas import ContentPlan, ContentPlanItem, GeneratedPost, ImageAsset
 MANUAL_PUBLISH_BUTTON_TEXT = "📰 Опубликовать новость"
 CONTENT_PLAN_BUTTON_TEXT = "🗓️ Контент план"
 REMINDERS_BUTTON_TEXT = "⏰ Напоминания"
+BACK_BUTTON_TEXT = "⬅️ Назад"
+MENU_BUTTON_TEXT = "🏠 Меню"
+CANCEL_BUTTON_TEXT = "❌ Отмена"
 REGENERATE_CONTENT_PLAN_BUTTON_TEXT = "🔄 Перегенерировать"
 APPROVE_CONTENT_PLAN_BUTTON_TEXT = "✅ Согласовать"
 APPROVE_REMINDER_BUTTON_TEXT = "✅ Одобрить пост"
@@ -36,6 +39,9 @@ MAIN_MENU_BUTTON_TEXTS = {
 CONTENT_PLAN_DIALOG_BUTTON_TEXTS = {
     REGENERATE_CONTENT_PLAN_BUTTON_TEXT,
     APPROVE_CONTENT_PLAN_BUTTON_TEXT,
+    BACK_BUTTON_TEXT,
+    MENU_BUTTON_TEXT,
+    CANCEL_BUTTON_TEXT,
 }
 
 REMINDER_APPROVAL_BUTTON_TEXTS = {
@@ -43,6 +49,8 @@ REMINDER_APPROVAL_BUTTON_TEXTS = {
     REJECT_REMINDER_BUTTON_TEXT,
     REGENERATE_REMINDER_TEXT_BUTTON_TEXT,
     REGENERATE_REMINDER_IMAGE_BUTTON_TEXT,
+    MENU_BUTTON_TEXT,
+    CANCEL_BUTTON_TEXT,
 }
 
 logger = logging.getLogger(__name__)
@@ -202,6 +210,7 @@ class TelegramPublisher:
             self._send_control_message(
                 chat_id,
                 "Опишите контент план в свободном формате: период, темы и желаемое расписание.",
+                reply_markup=self._content_plan_description_keyboard(),
             )
 
         @self.bot.message_handler(
@@ -212,6 +221,24 @@ class TelegramPublisher:
             chat_key = self._chat_key(chat_id)
             state = self._content_plan_dialogs.get(chat_key, {})
             text = getattr(message, "text", "") or ""
+
+            if text in {MENU_BUTTON_TEXT, CANCEL_BUTTON_TEXT}:
+                self._content_plan_dialogs.pop(chat_key, None)
+                self._send_main_menu(
+                    chat_id,
+                    "Диалог контент-плана отменен. Выберите действие в меню.",
+                )
+                return
+
+            if text == BACK_BUTTON_TEXT:
+                state.clear()
+                state["awaiting_description"] = True
+                self._send_control_message(
+                    chat_id,
+                    "Вернулись на шаг описания. Отправьте новый контент-план в свободном формате или нажмите «Отмена».",
+                    reply_markup=self._content_plan_description_keyboard(),
+                )
+                return
 
             if state.get("awaiting_description"):
                 state["description"] = text
@@ -235,6 +262,7 @@ class TelegramPublisher:
                 self._send_control_message(
                     chat_id,
                     "✅ Контент план согласован и сохранен. Посты будут опубликованы по расписанию.",
+                    reply_markup=self._manual_publish_keyboard(),
                 )
                 return
 
@@ -309,6 +337,7 @@ class TelegramPublisher:
             self._send_control_message(
                 chat_id,
                 "За сколько минут до публикации напоминать? Отправьте число минут или 0, чтобы отключить напоминания.",
+                reply_markup=self._reminders_settings_keyboard(),
             )
 
         @self.bot.message_handler(
@@ -317,6 +346,13 @@ class TelegramPublisher:
         def handle_reminders_dialog(message: Any) -> None:
             chat_id = self._message_chat_id(message)
             text = (getattr(message, "text", "") or "").strip()
+            if text in {MENU_BUTTON_TEXT, CANCEL_BUTTON_TEXT}:
+                self._reminder_dialogs.pop(self._chat_key(chat_id), None)
+                self._send_main_menu(
+                    chat_id,
+                    "Настройка напоминаний отменена. Выберите действие в меню.",
+                )
+                return
             if text.lower() in {"0", "нет", "отключить", "выключить", "off"}:
                 self.reminder_minutes_before = None
                 self.reminder_chat_id = chat_id
@@ -326,6 +362,7 @@ class TelegramPublisher:
                 self._send_control_message(
                     chat_id,
                     "✅ Напоминания отключены. Уведомления перед публикациями приходить не будут.",
+                    reply_markup=self._manual_publish_keyboard(),
                 )
                 return
             try:
@@ -344,11 +381,15 @@ class TelegramPublisher:
             if reminder_minutes_callback is not None:
                 reminder_minutes_callback(minutes, chat_id)
             self._send_control_message(
-                chat_id, f"✅ Напомню за {minutes} минут до каждой публикации поста."
+                chat_id,
+                f"✅ Напомню за {minutes} минут до каждой публикации поста.",
+                reply_markup=self._manual_publish_keyboard(),
             )
 
     def _is_reminder_dialog_message(self, message: Any) -> bool:
         text = self._message_text(message)
+        if text in {MENU_BUTTON_TEXT, CANCEL_BUTTON_TEXT}:
+            return self._message_chat_key(message) in self._reminder_dialogs
         if text in MAIN_MENU_BUTTON_TEXTS or text in CONTENT_PLAN_DIALOG_BUTTON_TEXTS:
             return False
         return self._message_chat_key(message) in self._reminder_dialogs
@@ -378,6 +419,10 @@ class TelegramPublisher:
             types.KeyboardButton(REGENERATE_REMINDER_TEXT_BUTTON_TEXT),
             types.KeyboardButton(REGENERATE_REMINDER_IMAGE_BUTTON_TEXT),
         )
+        keyboard.add(
+            types.KeyboardButton(MENU_BUTTON_TEXT),
+            types.KeyboardButton(CANCEL_BUTTON_TEXT),
+        )
         return keyboard
 
     @staticmethod
@@ -398,6 +443,29 @@ class TelegramPublisher:
         keyboard.add(
             types.KeyboardButton(REGENERATE_CONTENT_PLAN_BUTTON_TEXT),
             types.KeyboardButton(APPROVE_CONTENT_PLAN_BUTTON_TEXT),
+        )
+        keyboard.add(
+            types.KeyboardButton(BACK_BUTTON_TEXT),
+            types.KeyboardButton(MENU_BUTTON_TEXT),
+            types.KeyboardButton(CANCEL_BUTTON_TEXT),
+        )
+        return keyboard
+
+    @staticmethod
+    def _content_plan_description_keyboard() -> types.ReplyKeyboardMarkup:
+        keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        keyboard.add(
+            types.KeyboardButton(MENU_BUTTON_TEXT),
+            types.KeyboardButton(CANCEL_BUTTON_TEXT),
+        )
+        return keyboard
+
+    @staticmethod
+    def _reminders_settings_keyboard() -> types.ReplyKeyboardMarkup:
+        keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        keyboard.add(
+            types.KeyboardButton(MENU_BUTTON_TEXT),
+            types.KeyboardButton(CANCEL_BUTTON_TEXT),
         )
         return keyboard
 
@@ -422,17 +490,30 @@ class TelegramPublisher:
                 self._send_control_message(chat_id, "Нет поста, ожидающего решения.")
                 return
             text = getattr(message, "text", None)
+            if text in {MENU_BUTTON_TEXT, CANCEL_BUTTON_TEXT}:
+                self._pending_reminder_items.pop(chat_key, None)
+                self._send_main_menu(
+                    chat_id,
+                    "Решение по напоминанию закрыто. Запланированный пост не изменен.",
+                )
+                return
             try:
                 if text == APPROVE_REMINDER_BUTTON_TEXT:
                     approve_callback(item_id)
                     self._pending_reminder_items.pop(chat_key, None)
                     self._send_control_message(
-                        chat_id, "✅ Пост одобрен и опубликован."
+                        chat_id,
+                        "✅ Пост одобрен и опубликован.",
+                        reply_markup=self._manual_publish_keyboard(),
                     )
                 elif text == REJECT_REMINDER_BUTTON_TEXT:
                     reject_callback(item_id)
                     self._pending_reminder_items.pop(chat_key, None)
-                    self._send_control_message(chat_id, "❌ Публикация отменена.")
+                    self._send_control_message(
+                        chat_id,
+                        "❌ Публикация отменена.",
+                        reply_markup=self._manual_publish_keyboard(),
+                    )
                 elif text == REGENERATE_REMINDER_TEXT_BUTTON_TEXT:
                     item = regenerate_text_callback(item_id)
                     self.send_publication_reminder(chat_id, item_id, item)
@@ -526,6 +607,11 @@ class TelegramPublisher:
         )
         keyboard.add(types.KeyboardButton(REMINDERS_BUTTON_TEXT))
         return keyboard
+
+    def _send_main_menu(self, chat_id: str | int, text: str) -> int:
+        return self._send_control_message(
+            chat_id, text, reply_markup=self._manual_publish_keyboard()
+        )
 
     def _send_control_message(
         self, chat_id: str | int, text: str, **kwargs: Any
