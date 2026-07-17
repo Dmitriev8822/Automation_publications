@@ -19,7 +19,13 @@ def repository():
         future=True,
     )
     Base.metadata.create_all(bind=engine)
-    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False, future=True)
+    SessionLocal = sessionmaker(
+        bind=engine,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+        future=True,
+    )
     return PostRepository(SessionLocal), engine
 
 
@@ -91,7 +97,9 @@ def test_mark_published(repository, generated_post):
     repo, _ = repository
     repo.save_generated(generated_post)
 
-    published = repo.mark_published(str(generated_post.source_url), telegram_message_id=456)
+    published = repo.mark_published(
+        str(generated_post.source_url), telegram_message_id=456
+    )
 
     assert published.status is PostStatus.PUBLISHED
     assert published.telegram_message_id == 456
@@ -126,6 +134,7 @@ def test_ensure_sqlite_parent_dir_creates_missing_directory(tmp_path):
 
     assert db_path.parent.is_dir()
 
+
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from app.database import ContentPlanRepository
@@ -140,15 +149,31 @@ def make_content_plan() -> ContentPlan:
         period_end=now + timedelta(days=1),
         raw_request="план",
         items=[
-            {"scheduled_at": now - timedelta(minutes=1), "title": "Due", "text": "Due text", "image_prompt": ""},
-            {"scheduled_at": now + timedelta(hours=1), "title": "Future", "text": "Future text", "image_prompt": ""},
+            {
+                "scheduled_at": now - timedelta(minutes=1),
+                "title": "Due",
+                "text": "Due text",
+                "image_prompt": "",
+            },
+            {
+                "scheduled_at": now + timedelta(hours=1),
+                "title": "Future",
+                "text": "Future text",
+                "image_prompt": "",
+            },
         ],
     )
 
 
 def test_content_plan_repository_saves_and_returns_due_items(repository):
     _, engine = repository
-    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False, future=True)
+    SessionLocal = sessionmaker(
+        bind=engine,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+        future=True,
+    )
     repo = ContentPlanRepository(SessionLocal)
 
     plan_id = repo.save_plan(make_content_plan())
@@ -167,7 +192,13 @@ def test_content_plan_repository_saves_and_returns_due_items(repository):
 
 def test_content_plan_repository_returns_scheduled_item_slots(repository):
     _, engine = repository
-    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False, future=True)
+    SessionLocal = sessionmaker(
+        bind=engine,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+        future=True,
+    )
     repo = ContentPlanRepository(SessionLocal)
 
     repo.save_plan(make_content_plan())
@@ -180,18 +211,67 @@ def test_content_plan_repository_returns_scheduled_item_slots(repository):
 
 def test_content_plan_repository_treats_naive_times_as_app_timezone(repository):
     _, engine = repository
-    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False, future=True)
+    SessionLocal = sessionmaker(
+        bind=engine,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+        future=True,
+    )
     repo = ContentPlanRepository(SessionLocal, app_timezone=ZoneInfo("Europe/Moscow"))
     plan = ContentPlan(
         title="План",
         period_start=datetime(2026, 7, 17, 13, 0),
         period_end=datetime(2026, 7, 17, 14, 0),
-        items=[{"scheduled_at": datetime(2026, 7, 17, 13, 35), "title": "Local", "text": "Text"}],
+        items=[
+            {
+                "scheduled_at": datetime(2026, 7, 17, 13, 35),
+                "title": "Local",
+                "text": "Text",
+            }
+        ],
     )
 
     repo.save_plan(plan)
     slots = repo.get_scheduled_item_slots()
 
     assert slots[0][1].isoformat() == "2026-07-17T13:35:00+03:00"
-    assert repo.get_due_items(datetime(2026, 7, 17, 13, 34, tzinfo=ZoneInfo("Europe/Moscow"))) == []
-    assert len(repo.get_due_items(datetime(2026, 7, 17, 13, 35, tzinfo=ZoneInfo("Europe/Moscow")))) == 1
+    assert (
+        repo.get_due_items(
+            datetime(2026, 7, 17, 13, 34, tzinfo=ZoneInfo("Europe/Moscow"))
+        )
+        == []
+    )
+    assert (
+        len(
+            repo.get_due_items(
+                datetime(2026, 7, 17, 13, 35, tzinfo=ZoneInfo("Europe/Moscow"))
+            )
+        )
+        == 1
+    )
+
+
+from app.database import ReminderSettingsRepository
+
+
+def test_reminder_settings_repository_persists_enable_and_disable(repository):
+    _, engine = repository
+    SessionLocal = sessionmaker(
+        bind=engine,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+        future=True,
+    )
+    repo = ReminderSettingsRepository(SessionLocal)
+
+    assert repo.get_settings() == (False, None, None)
+
+    repo.enable(5, 777)
+
+    assert repo.get_settings() == (True, 5, "777")
+
+    repo.disable()
+
+    assert repo.get_settings() == (False, None, "777")

@@ -261,9 +261,9 @@ class TelegramPublisher:
 
     def register_reminders_handler(
         self,
-        reminder_minutes_callback: Callable[[int], Any] | None = None,
+        reminder_minutes_callback: Callable[[int | None, int | str], Any] | None = None,
     ) -> None:
-        """Register dialog that asks how many minutes before publication to remind."""
+        """Register dialog that enables or disables persistent publication reminders."""
 
         @self.bot.message_handler(
             func=lambda message: getattr(message, "text", None) == REMINDERS_BUTTON_TEXT
@@ -273,7 +273,7 @@ class TelegramPublisher:
             self._reminder_dialogs[chat_id] = {"awaiting_minutes": True}
             self._send_control_message(
                 chat_id,
-                "За сколько минут до публикации напоминать? Отправьте число минут.",
+                "За сколько минут до публикации напоминать? Отправьте число минут или 0, чтобы отключить напоминания.",
             )
 
         @self.bot.message_handler(
@@ -282,22 +282,34 @@ class TelegramPublisher:
         def handle_reminders_dialog(message: Any) -> None:
             chat_id = self._message_chat_id(message)
             text = (getattr(message, "text", "") or "").strip()
+            if text.lower() in {"0", "нет", "отключить", "выключить", "off"}:
+                self.reminder_minutes_before = None
+                self.reminder_chat_id = chat_id
+                self._reminder_dialogs.pop(chat_id, None)
+                if reminder_minutes_callback is not None:
+                    reminder_minutes_callback(None, chat_id)
+                self._send_control_message(
+                    chat_id,
+                    "✅ Напоминания отключены. Уведомления перед публикациями приходить не будут.",
+                )
+                return
             try:
                 minutes = int(text)
                 if minutes <= 0:
                     raise ValueError
             except ValueError:
                 self._send_control_message(
-                    chat_id, "Введите положительное число минут, например 30."
+                    chat_id,
+                    "Введите положительное число минут, например 30, или 0 для отключения.",
                 )
                 return
             self.reminder_minutes_before = minutes
             self.reminder_chat_id = chat_id
             self._reminder_dialogs.pop(chat_id, None)
             if reminder_minutes_callback is not None:
-                reminder_minutes_callback(minutes)
+                reminder_minutes_callback(minutes, chat_id)
             self._send_control_message(
-                chat_id, f"✅ Напомню за {minutes} минут до публикации поста."
+                chat_id, f"✅ Напомню за {minutes} минут до каждой публикации поста."
             )
 
     def _is_reminder_dialog_message(self, message: Any) -> bool:

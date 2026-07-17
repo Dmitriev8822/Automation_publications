@@ -8,7 +8,12 @@ import pytest
 
 from datetime import datetime, timedelta, timezone
 
-from app.scheduler import create_content_plan_scheduler, create_scheduler
+from app.scheduler import (
+    add_content_plan_reminder_jobs,
+    create_content_plan_scheduler,
+    create_scheduler,
+    remove_content_plan_reminder_jobs,
+)
 
 
 def test_create_scheduler_uses_requested_interval() -> None:
@@ -29,8 +34,6 @@ def test_create_scheduler_runs_first_job_immediately() -> None:
     assert job.next_run_time is not None
 
 
-
-
 def test_create_content_plan_scheduler_registers_date_jobs() -> None:
     run_at = datetime.now(timezone.utc) + timedelta(minutes=15)
     scheduler = create_content_plan_scheduler(lambda: None, [(42, run_at)])
@@ -41,7 +44,10 @@ def test_create_content_plan_scheduler_registers_date_jobs() -> None:
     assert jobs[0].id == "content_plan_item_42"
     assert jobs[0].trigger.run_date == run_at
 
-def test_build_runtime_uses_exact_content_plan_jobs_without_periodic_news(monkeypatch: pytest.MonkeyPatch) -> None:
+
+def test_build_runtime_uses_exact_content_plan_jobs_without_periodic_news(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from app import main as app_main
 
     run_at = datetime.now(timezone.utc) + timedelta(minutes=10)
@@ -91,8 +97,12 @@ def test_build_runtime_uses_exact_content_plan_jobs_without_periodic_news(monkey
     monkeypatch.setattr(app_main, "ContentPlanRepository", DummyContentPlanRepository)
     monkeypatch.setattr(app_main, "AIClient", DummyAIClient)
     monkeypatch.setattr(app_main, "TelegramPublisher", DummyTelegramPublisher)
-    monkeypatch.setattr(app_main, "create_and_publish_post", fake_create_and_publish_post)
-    monkeypatch.setattr(app_main, "publish_due_content_plan_items", fake_publish_due_content_plan_items)
+    monkeypatch.setattr(
+        app_main, "create_and_publish_post", fake_create_and_publish_post
+    )
+    monkeypatch.setattr(
+        app_main, "publish_due_content_plan_items", fake_publish_due_content_plan_items
+    )
 
     runtime = app_main.build_runtime(DummySettings())
     job = runtime.scheduler.get_jobs()[0]
@@ -100,6 +110,106 @@ def test_build_runtime_uses_exact_content_plan_jobs_without_periodic_news(monkey
 
     assert job.id == "content_plan_item_5"
     assert calls == ["content_plan"]
+
+
+def test_remove_content_plan_reminder_jobs_keeps_publication_jobs() -> None:
+    run_at = datetime.now(timezone.utc) + timedelta(minutes=15)
+    scheduler = create_content_plan_scheduler(lambda: None, [(42, run_at)])
+    add_content_plan_reminder_jobs(scheduler, lambda item_id: None, [(42, run_at)], 5)
+
+    remove_content_plan_reminder_jobs(scheduler)
+
+    assert [job.id for job in scheduler.get_jobs()] == ["content_plan_item_42"]
+
+
+def test_build_runtime_applies_persistent_reminders_to_existing_and_new_items(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app import main as app_main
+
+    first_run_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+    second_run_at = datetime.now(timezone.utc) + timedelta(minutes=20)
+
+    class DummySettings:
+        publish_interval_minutes = 1
+
+    class DummyTelegramPublisher:
+        def __init__(self, settings) -> None:
+            self.settings = settings
+            self.reminder_minutes_before = None
+            self.reminder_chat_id = None
+
+        def register_manual_publish_handler(self, handler) -> None:
+            pass
+
+        def register_content_plan_handler(self, generator, saver) -> None:
+            self.save_plan = saver
+
+        def register_reminders_handler(self, handler) -> None:
+            self.reminders_handler = handler
+
+        def register_publication_approval_handler(self, *handlers) -> None:
+            pass
+
+    class DummyAIClient:
+        def __init__(self, settings) -> None:
+            pass
+
+        def generate_content_plan(self, request: str):
+            return request
+
+    class DummyPostRepository:
+        pass
+
+    class DummyContentPlanRepository:
+        def __init__(self) -> None:
+            self.slots = [(1, first_run_at)]
+
+        def save_plan(self, plan) -> int:
+            self.slots = [(1, first_run_at), (2, second_run_at)]
+            return 10
+
+        def get_scheduled_item_slots(self):
+            return self.slots
+
+    class DummyReminderSettingsRepository:
+        def get_settings(self):
+            return True, 5, 777
+
+        def enable(self, minutes, chat_id) -> None:
+            pass
+
+        def disable(self) -> None:
+            pass
+
+    monkeypatch.setattr(app_main, "validate_runtime_settings", lambda settings: None)
+    monkeypatch.setattr(app_main, "init_db", lambda: None)
+    monkeypatch.setattr(app_main, "PostRepository", DummyPostRepository)
+    monkeypatch.setattr(app_main, "ContentPlanRepository", DummyContentPlanRepository)
+    monkeypatch.setattr(
+        app_main, "ReminderSettingsRepository", DummyReminderSettingsRepository
+    )
+    monkeypatch.setattr(app_main, "AIClient", DummyAIClient)
+    monkeypatch.setattr(app_main, "TelegramPublisher", DummyTelegramPublisher)
+
+    runtime = app_main.build_runtime(DummySettings())
+
+    assert runtime.telegram_publisher.reminder_minutes_before == 5
+    assert runtime.telegram_publisher.reminder_chat_id == 777
+    assert sorted(job.id for job in runtime.scheduler.get_jobs()) == [
+        "content_plan_item_1",
+        "content_plan_reminder_1",
+    ]
+
+    runtime.telegram_publisher.save_plan(object())
+
+    assert {job.id for job in runtime.scheduler.get_jobs()} == {
+        "content_plan_item_1",
+        "content_plan_item_2",
+        "content_plan_reminder_1",
+        "content_plan_reminder_2",
+    }
+
 
 def test_create_scheduler_registers_job_function() -> None:
     calls: list[str] = []
@@ -110,7 +220,9 @@ def test_create_scheduler_registers_job_function() -> None:
     assert calls == ["called"]
 
 
-def test_scheduler_job_logs_exceptions_without_reraising(caplog: pytest.LogCaptureFixture) -> None:
+def test_scheduler_job_logs_exceptions_without_reraising(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     def failing_job() -> None:
         raise RuntimeError("boom")
 
@@ -122,7 +234,9 @@ def test_scheduler_job_logs_exceptions_without_reraising(caplog: pytest.LogCaptu
     assert "boom" in caplog.text
 
 
-def test_run_startup_tests_suppresses_existing_root_handlers(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_startup_tests_suppresses_existing_root_handlers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from app import main as app_main
 
     root_logger = app_main.logging.getLogger()
@@ -146,14 +260,18 @@ def test_run_startup_tests_suppresses_existing_root_handlers(monkeypatch: pytest
         root_logger.removeHandler(handler)
 
 
-def test_main_import_does_not_start_application(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_import_does_not_start_application(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     started = False
 
     def fake_start(*args, **kwargs):
         nonlocal started
         started = True
 
-    monkeypatch.setattr("apscheduler.schedulers.background.BackgroundScheduler.start", fake_start)
+    monkeypatch.setattr(
+        "apscheduler.schedulers.background.BackgroundScheduler.start", fake_start
+    )
 
     import app.main
 
@@ -162,7 +280,9 @@ def test_main_import_does_not_start_application(monkeypatch: pytest.MonkeyPatch)
     assert started is False
 
 
-def test_main_does_not_start_scheduler_when_startup_tests_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_does_not_start_scheduler_when_startup_tests_fail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from app import main as app_main
 
     class DummySettings:
@@ -195,7 +315,9 @@ def test_main_does_not_start_scheduler_when_startup_tests_fail(monkeypatch: pyte
     assert dummy_scheduler.started is False
 
 
-def test_main_returns_error_when_dependency_setup_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_returns_error_when_dependency_setup_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from app import main as app_main
 
     class DummySettings:
@@ -213,7 +335,9 @@ def test_main_returns_error_when_dependency_setup_fails(monkeypatch: pytest.Monk
     assert app_main.main(["--check"]) == 1
 
 
-def test_main_check_mode_initializes_dependencies_without_starting_scheduler(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_check_mode_initializes_dependencies_without_starting_scheduler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from app import main as app_main
 
     class DummySettings:
@@ -264,7 +388,9 @@ def test_main_can_run_as_script_path_for_help() -> None:
     assert "ModuleNotFoundError" not in result.stderr
 
 
-def test_main_returns_error_when_manual_polling_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_returns_error_when_manual_polling_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from app import main as app_main
 
     class DummySettings:
@@ -303,7 +429,9 @@ def test_main_returns_error_when_manual_polling_fails(monkeypatch: pytest.Monkey
     assert dummy_scheduler.shutdown_called is True
 
 
-def test_main_check_telegram_validates_token_without_startup_tests(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_check_telegram_validates_token_without_startup_tests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from app import main as app_main
 
     class DummySettings:
@@ -334,7 +462,9 @@ def test_main_check_telegram_validates_token_without_startup_tests(monkeypatch: 
     assert startup_tests_called is False
 
 
-def test_main_check_telegram_returns_error_for_invalid_token(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_check_telegram_returns_error_for_invalid_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from app import main as app_main
 
     class DummySettings:

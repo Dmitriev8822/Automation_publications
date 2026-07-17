@@ -108,6 +108,15 @@ def add_content_plan_reminder_jobs(
         )
 
 
+def remove_content_plan_reminder_jobs(scheduler: BackgroundScheduler) -> None:
+    """Remove all registered content-plan reminder jobs."""
+
+    for job in list(scheduler.get_jobs()):
+        if job.id.startswith("content_plan_reminder_"):
+            scheduler.remove_job(job.id)
+            logger.info("Removed content-plan reminder job: id=%s", job.id)
+
+
 def create_content_plan_scheduler(
     job_func: Callable[[], Any],
     scheduled_items: list[tuple[int, datetime]] | None = None,

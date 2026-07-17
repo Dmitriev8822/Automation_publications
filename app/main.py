@@ -16,11 +16,17 @@ import pytest
 
 from app.ai import AIClient
 from app.config import Settings, get_settings, validate_runtime_settings
-from app.database import ContentPlanRepository, PostRepository, init_db
+from app.database import (
+    ContentPlanRepository,
+    PostRepository,
+    ReminderSettingsRepository,
+    init_db,
+)
 from app.scheduler import (
     add_content_plan_item_jobs,
     add_content_plan_reminder_jobs,
     create_content_plan_scheduler,
+    remove_content_plan_reminder_jobs,
     create_scheduler,
 )
 from app.service import (
@@ -104,6 +110,7 @@ def build_runtime(settings: Settings) -> ApplicationRuntime:
     logger.info("Creating PostRepository, AIClient and TelegramPublisher")
     repository = PostRepository()
     content_plan_repository = ContentPlanRepository()
+    reminder_settings_repository = ReminderSettingsRepository()
     ai_client = AIClient(settings)
     telegram_publisher = TelegramPublisher(settings)
 
@@ -126,6 +133,22 @@ def build_runtime(settings: Settings) -> ApplicationRuntime:
         content_plan_repository.get_scheduled_item_slots(),
     )
 
+    def schedule_persistent_reminders() -> None:
+        enabled, minutes, chat_id = reminder_settings_repository.get_settings()
+        remove_content_plan_reminder_jobs(scheduler)
+        if not enabled or minutes is None or chat_id is None:
+            telegram_publisher.reminder_minutes_before = None
+            telegram_publisher.reminder_chat_id = chat_id
+            return
+        telegram_publisher.reminder_minutes_before = minutes
+        telegram_publisher.reminder_chat_id = chat_id
+        add_content_plan_reminder_jobs(
+            scheduler,
+            reminder_job,
+            content_plan_repository.get_scheduled_item_slots(),
+            minutes,
+        )
+
     def save_content_plan_and_schedule(plan):
         plan_id = content_plan_repository.save_plan(plan)
         add_content_plan_item_jobs(
@@ -133,6 +156,7 @@ def build_runtime(settings: Settings) -> ApplicationRuntime:
             scheduled_content_plan_job,
             content_plan_repository.get_scheduled_item_slots(),
         )
+        schedule_persistent_reminders()
         return plan_id
 
     telegram_publisher.register_content_plan_handler(
@@ -147,15 +171,15 @@ def build_runtime(settings: Settings) -> ApplicationRuntime:
             telegram_publisher.reminder_chat_id, item_id, item
         )
 
-    def configure_reminders(minutes: int):
-        add_content_plan_reminder_jobs(
-            scheduler,
-            reminder_job,
-            content_plan_repository.get_scheduled_item_slots(),
-            minutes,
-        )
+    def configure_reminders(minutes: int | None, chat_id: int | str):
+        if minutes is None:
+            reminder_settings_repository.disable()
+        else:
+            reminder_settings_repository.enable(minutes, chat_id)
+        schedule_persistent_reminders()
 
     if hasattr(telegram_publisher, "register_reminders_handler"):
+        schedule_persistent_reminders()
         telegram_publisher.register_reminders_handler(configure_reminders)
     if hasattr(telegram_publisher, "register_publication_approval_handler"):
         telegram_publisher.register_publication_approval_handler(

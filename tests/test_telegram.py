@@ -334,10 +334,12 @@ def test_content_plan_dialog_passes_follow_up_context_until_approval() -> None:
 def test_reminders_dialog_saves_minutes_and_approval_handler_calls_callback() -> None:
     bot = FakeBot()
     publisher = TelegramPublisher(settings=make_settings(), bot=bot)
-    configured: list[int] = []
+    configured: list[tuple[int | None, int | str]] = []
     approved: list[int] = []
 
-    publisher.register_reminders_handler(configured.append)
+    publisher.register_reminders_handler(
+        lambda minutes, chat_id: configured.append((minutes, chat_id))
+    )
     publisher.register_publication_approval_handler(
         approved.append,
         lambda item_id: None,
@@ -356,5 +358,26 @@ def test_reminders_dialog_saves_minutes_and_approval_handler_calls_callback() ->
 
     assert publisher.reminder_minutes_before == 15
     assert publisher.reminder_chat_id == 777
-    assert configured == [15]
+    assert configured == [(15, 777)]
     assert approved == [42]
+
+
+def test_reminders_dialog_can_disable_persistent_reminders() -> None:
+    bot = FakeBot()
+    publisher = TelegramPublisher(settings=make_settings(), bot=bot)
+    configured: list[tuple[int | None, int | str]] = []
+
+    publisher.register_reminders_handler(
+        lambda minutes, chat_id: configured.append((minutes, chat_id))
+    )
+    reminders_start = bot.handlers[0]["func"]
+    reminders_dialog = bot.handlers[1]["func"]
+    chat = SimpleNamespace(id=777)
+
+    reminders_start(SimpleNamespace(chat=chat, text=REMINDERS_BUTTON_TEXT))
+    reminders_dialog(SimpleNamespace(chat=chat, text="0"))
+
+    assert publisher.reminder_minutes_before is None
+    assert publisher.reminder_chat_id == 777
+    assert configured == [(None, 777)]
+    assert "Напоминания отключены" in bot.sent_messages[-1]["text"]

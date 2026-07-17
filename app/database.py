@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Callable
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     ForeignKey,
     Integer,
@@ -90,6 +91,20 @@ class PostRecord(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utc_now
     )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utc_now, onupdate=_utc_now
+    )
+
+
+class ReminderSettingsRecord(Base):
+    """Persistent user reminder preferences for content-plan publications."""
+
+    __tablename__ = "reminder_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    minutes_before: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    chat_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utc_now, onupdate=_utc_now
     )
@@ -285,6 +300,53 @@ class PostRepository:
             telegram_message_id=record.telegram_message_id,
             error_message=record.error_message,
         )
+
+
+class ReminderSettingsRepository:
+    """Repository for persistent content-plan reminder preferences."""
+
+    SETTINGS_ID = 1
+
+    def __init__(self, session_factory: Callable[[], Session] = SessionLocal) -> None:
+        self._session_factory = session_factory
+
+    def get_settings(self) -> tuple[bool, int | None, int | str | None]:
+        """Return enabled flag, minutes before publication, and target chat id."""
+
+        with self._session_factory() as session:
+            record = session.get(ReminderSettingsRecord, self.SETTINGS_ID)
+            if record is None:
+                return False, None, None
+            return record.enabled, record.minutes_before, record.chat_id
+
+    def enable(self, minutes_before: int, chat_id: int | str) -> None:
+        """Persist enabled reminders for all scheduled content-plan items."""
+
+        if minutes_before <= 0:
+            raise ValueError("minutes_before must be positive")
+        with self._session_factory() as session:
+            record = session.get(ReminderSettingsRecord, self.SETTINGS_ID)
+            if record is None:
+                record = ReminderSettingsRecord(id=self.SETTINGS_ID)
+                session.add(record)
+            record.enabled = True
+            record.minutes_before = minutes_before
+            record.chat_id = str(chat_id)
+            record.updated_at = _utc_now()
+            session.commit()
+
+    def disable(self) -> None:
+        """Persist disabled reminders."""
+
+        with self._session_factory() as session:
+            record = session.get(ReminderSettingsRecord, self.SETTINGS_ID)
+            if record is None:
+                record = ReminderSettingsRecord(id=self.SETTINGS_ID)
+                session.add(record)
+            record.enabled = False
+            record.minutes_before = None
+            record.updated_at = _utc_now()
+            session.commit()
 
 
 class ContentPlanRepository:
