@@ -58,7 +58,7 @@ def make_settings(**overrides) -> Settings:
         "enable_image_generation": True,
     }
     defaults.update(overrides)
-    return Settings(**defaults)
+    return Settings(**defaults, _env_file=None)
 
 
 def test_find_fresh_news_parses_successful_response() -> None:
