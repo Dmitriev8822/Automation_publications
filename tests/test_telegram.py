@@ -381,3 +381,22 @@ def test_reminders_dialog_can_disable_persistent_reminders() -> None:
     assert publisher.reminder_chat_id == 777
     assert configured == [(None, 777)]
     assert "Напоминания отключены" in bot.sent_messages[-1]["text"]
+
+
+def test_content_plan_dialog_reports_generation_error_without_reraising() -> None:
+    bot = FakeBot()
+    publisher = TelegramPublisher(settings=make_settings(), bot=bot)
+
+    def fail_generate(description: str, context: list[str] | None = None) -> ContentPlan:
+        raise RuntimeError("OpenRouter request failed")
+
+    publisher.register_content_plan_handler(fail_generate, lambda plan: None)
+    start_handler = bot.handlers[0]["func"]
+    dialog_handler = bot.handlers[1]["func"]
+    chat = SimpleNamespace(id=555)
+
+    start_handler(SimpleNamespace(chat=chat, text=CONTENT_PLAN_BUTTON_TEXT))
+    dialog_handler(SimpleNamespace(chat=chat, text="план на неделю"))
+
+    assert "Не удалось сформировать контент план" in bot.sent_messages[-1]["text"]
+    assert "OpenRouter request failed" in bot.sent_messages[-1]["text"]
