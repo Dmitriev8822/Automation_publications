@@ -88,3 +88,7 @@ python app/main.py
 ## Консольное логирование
 
 Точка входа пишет INFO-логи о запуске startup-тестов, сборке зависимостей, создании репозитория, AI-клиента, Telegram publisher и scheduler. Это позволяет отделить ошибки конфигурации/инициализации от ошибок бизнес-сценария публикации.
+
+## Подключение контент-плана
+
+`build_runtime()` дополнительно создает `ContentPlanRepository`, регистрирует `TelegramPublisher.register_content_plan_handler(ai_client.generate_content_plan, content_plan_repository.save_plan)` и добавляет в scheduled job вызов `publish_due_content_plan_items(telegram_publisher, content_plan_repository)` после обычного сценария новостной публикации. Поэтому один и тот же интервал `PUBLISH_INTERVAL_MINUTES` проверяет и новости, и наступившие пункты согласованных контент-планов.

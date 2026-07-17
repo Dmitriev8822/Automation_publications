@@ -268,3 +268,31 @@ def test_find_fresh_news_retries_with_json_object_when_json_schema_request_fails
     assert len(http_client.requests) == 2
     assert http_client.requests[0]["json"]["response_format"]["type"] == "json_schema"
     assert http_client.requests[1]["json"]["response_format"]["type"] == "json_object"
+
+
+def test_generate_content_plan_parses_structured_plan() -> None:
+    content = json.dumps(
+        {
+            "plan": {
+                "title": "План на неделю",
+                "period_start": "2026-07-20T09:00:00Z",
+                "period_end": "2026-07-26T18:00:00Z",
+                "items": [
+                    {
+                        "scheduled_at": "2026-07-20T10:00:00Z",
+                        "title": "Первый пост",
+                        "text": "Текст первого поста",
+                        "image_prompt": "Иллюстрация",
+                    }
+                ],
+            }
+        }
+    )
+    client = AIClient(settings=make_settings(), http_client=FakeHTTPClient([content]))
+
+    plan = client.generate_content_plan("нужен план на неделю")
+
+    assert plan.title == "План на неделю"
+    assert plan.raw_request == "нужен план на неделю"
+    assert plan.items[0].title == "Первый пост"
+    assert client.http_client.requests[0]["json"]["response_format"]["json_schema"]["name"] == "content_plan"
