@@ -162,3 +162,16 @@ def test_content_plan_repository_saves_and_returns_due_items(repository):
     assert published.status is ContentPlanItemStatus.PUBLISHED
     assert published.telegram_message_id == 321
     assert repo.get_due_items() == []
+
+
+def test_content_plan_repository_returns_scheduled_item_slots(repository):
+    _, engine = repository
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False, future=True)
+    repo = ContentPlanRepository(SessionLocal)
+
+    repo.save_plan(make_content_plan())
+    slots = repo.get_scheduled_item_slots()
+
+    assert len(slots) == 2
+    assert all(isinstance(item_id, int) for item_id, _scheduled_at in slots)
+    assert slots[0][1] <= slots[1][1]

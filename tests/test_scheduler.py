@@ -6,7 +6,9 @@ import importlib
 
 import pytest
 
-from app.scheduler import create_scheduler
+from datetime import datetime, timedelta, timezone
+
+from app.scheduler import create_content_plan_scheduler, create_scheduler
 
 
 def test_create_scheduler_uses_requested_interval() -> None:
@@ -27,8 +29,22 @@ def test_create_scheduler_runs_first_job_immediately() -> None:
     assert job.next_run_time is not None
 
 
-def test_build_runtime_scheduled_job_publishes_content_plan_after_news_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+
+
+def test_create_content_plan_scheduler_registers_date_jobs() -> None:
+    run_at = datetime.now(timezone.utc) + timedelta(minutes=15)
+    scheduler = create_content_plan_scheduler(lambda: None, [(42, run_at)])
+
+    jobs = scheduler.get_jobs()
+
+    assert len(jobs) == 1
+    assert jobs[0].id == "content_plan_item_42"
+    assert jobs[0].trigger.run_date == run_at
+
+def test_build_runtime_uses_exact_content_plan_jobs_without_periodic_news(monkeypatch: pytest.MonkeyPatch) -> None:
     from app import main as app_main
+
+    run_at = datetime.now(timezone.utc) + timedelta(minutes=10)
 
     class DummySettings:
         publish_interval_minutes = 1
@@ -54,14 +70,16 @@ def test_build_runtime_scheduled_job_publishes_content_plan_after_news_failure(m
         pass
 
     class DummyContentPlanRepository:
-        def __init__(self) -> None:
-            self.save_plan = lambda plan: 1
+        def save_plan(self, plan) -> int:
+            return 1
+
+        def get_scheduled_item_slots(self):
+            return [(5, run_at)]
 
     calls: list[str] = []
 
     def fake_create_and_publish_post(*args, **kwargs):
         calls.append("news")
-        raise RuntimeError("news failed")
 
     def fake_publish_due_content_plan_items(*args, **kwargs):
         calls.append("content_plan")
@@ -77,9 +95,11 @@ def test_build_runtime_scheduled_job_publishes_content_plan_after_news_failure(m
     monkeypatch.setattr(app_main, "publish_due_content_plan_items", fake_publish_due_content_plan_items)
 
     runtime = app_main.build_runtime(DummySettings())
-    runtime.scheduler.get_jobs()[0].func()
+    job = runtime.scheduler.get_jobs()[0]
+    job.func()
 
-    assert calls == ["news", "content_plan"]
+    assert job.id == "content_plan_item_5"
+    assert calls == ["content_plan"]
 
 def test_create_scheduler_registers_job_function() -> None:
     calls: list[str] = []

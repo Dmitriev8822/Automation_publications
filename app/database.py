@@ -236,6 +236,17 @@ class ContentPlanRepository:
             ).all()
             return [(record.id, self._item_to_schema(record)) for record in records]
 
+    def get_scheduled_item_slots(self) -> list[tuple[int, datetime]]:
+        """Return ids and planned times for all not-yet-published content-plan items."""
+
+        with self._session_factory() as session:
+            records = session.scalars(
+                select(ContentPlanItemRecord)
+                .where(ContentPlanItemRecord.status == ContentPlanItemStatus.SCHEDULED.value)
+                .order_by(ContentPlanItemRecord.scheduled_at)
+            ).all()
+            return [(record.id, record.scheduled_at) for record in records]
+
     def mark_item_published(self, item_id: int, telegram_message_id: int) -> ContentPlanItem:
         with self._session_factory() as session:
             record = self._require_item(session, item_id)

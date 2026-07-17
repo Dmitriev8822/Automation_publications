@@ -17,7 +17,7 @@ import pytest
 from app.ai import AIClient
 from app.config import Settings, get_settings, validate_runtime_settings
 from app.database import ContentPlanRepository, PostRepository, init_db
-from app.scheduler import create_scheduler
+from app.scheduler import add_content_plan_item_jobs, create_content_plan_scheduler, create_scheduler
 from app.service import create_and_publish_post, publish_due_content_plan_items
 from app.telegram import TelegramPublisher
 
@@ -93,12 +93,9 @@ def build_runtime(settings: Settings) -> ApplicationRuntime:
     ai_client = AIClient(settings)
     telegram_publisher = TelegramPublisher(settings)
 
-    def scheduled_job():
-        try:
-            create_and_publish_post(ai_client, telegram_publisher, repository)
-        except Exception:
-            logger.exception("Scheduled news publication failed; continuing with content-plan items")
+    def scheduled_content_plan_job():
         publish_due_content_plan_items(telegram_publisher, content_plan_repository)
+
     manual_job = lambda progress: create_and_publish_post(
         ai_client,
         telegram_publisher,
@@ -106,10 +103,25 @@ def build_runtime(settings: Settings) -> ApplicationRuntime:
         progress_callback=progress,
     )
     telegram_publisher.register_manual_publish_handler(manual_job)
-    telegram_publisher.register_content_plan_handler(ai_client.generate_content_plan, content_plan_repository.save_plan)
 
-    logger.info("Creating scheduler with interval_minutes=%s", settings.publish_interval_minutes)
-    scheduler = create_scheduler(scheduled_job, settings.publish_interval_minutes)
+    logger.info("Creating content-plan scheduler from persisted scheduled items")
+    scheduler = create_content_plan_scheduler(
+        scheduled_content_plan_job,
+        content_plan_repository.get_scheduled_item_slots(),
+    )
+
+    def save_content_plan_and_schedule(plan):
+        plan_id = content_plan_repository.save_plan(plan)
+        add_content_plan_item_jobs(
+            scheduler,
+            scheduled_content_plan_job,
+            content_plan_repository.get_scheduled_item_slots(),
+        )
+        return plan_id
+
+    telegram_publisher.register_content_plan_handler(ai_client.generate_content_plan, save_content_plan_and_schedule)
+
+    logger.info("Content-plan scheduler created with %d job(s)", len(scheduler.get_jobs()))
     return ApplicationRuntime(scheduler=scheduler, telegram_publisher=telegram_publisher)
 
 
@@ -165,7 +177,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     runtime.scheduler.start()
-    logger.info("Scheduler started with %s minute interval", settings.publish_interval_minutes)
+    logger.info("Content-plan scheduler started with exact item run times")
     logger.info("Telegram bot manual publication controls started")
 
     try:
