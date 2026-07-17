@@ -119,7 +119,7 @@ System prompt задаёт роль генератора безопасного 
 
 ## Обработка ошибок
 
-- Ошибки HTTP-клиента и статусов OpenRouter нормализуются в `OpenRouterRequestError`; перед окончательной ошибкой клиент делает fallback с `json_object`, если первый запрос с `json_schema` был отклонён.
+- Ошибки HTTP-клиента и статусов OpenRouter нормализуются в `OpenRouterRequestError` с HTTP-статусом и, если доступно, текстом ошибки из ответа OpenRouter. Перед окончательной ошибкой клиент делает fallback с `json_object`, если первый запрос с `json_schema` был отклонён.
 - Невалидная структура ответа нормализуется в `OpenRouterResponseError`.
 - Невалидный base64 в `data`/`base64_data` изображения также приводит к `OpenRouterResponseError`, чтобы не отправлять в Telegram повреждённый файл.
 - Несуществующий `file_path`, возвращённый моделью, игнорируется. Если других источников изображения нет, `generate_image()` возвращает `None`, и публикация продолжается без изображения.
@@ -129,14 +129,14 @@ System prompt задаёт роль генератора безопасного 
   конкретный материал и ошибку важно видеть вызывающему сервису.
 - Если `ENABLE_IMAGE_GENERATION=false`, `generate_image()` не делает HTTP-запрос и возвращает `None`.
 - Клиент пишет подробные консольные логи о запросах к OpenRouter: endpoint, модель, имя ожидаемой JSON-схемы, тему поиска, лимит новостей, наличие API-ключа без вывода секрета, успешное завершение и ошибки HTTP-клиента.
-- При ошибке поиска новостей `find_fresh_news()` сохраняет текст последней ошибки в `AIClient.last_error_message`, чтобы `service.py` мог показать пользователю, что пустой список связан не с отсутствием новостей, а со сбоем запроса. Например, `401 Unauthorized` в логах означает, что OpenRouter отклонил ключ и биллинг не увеличится, потому что запрос не был авторизован.
+- При ошибке поиска новостей `find_fresh_news()` сохраняет текст последней ошибки в `AIClient.last_error_message`, чтобы `service.py` мог показать пользователю, что пустой список связан не с отсутствием новостей, а со сбоем запроса. Например, `401 Unauthorized` или `403 Forbidden` означает, что OpenRouter отклонил ключ, доступ к модели или настройки аккаунта, и биллинг не увеличится, потому что запрос не был авторизован.
 
 ## Настройки
 
 На генерацию влияют:
 
 - `OPENROUTER_API_KEY` — ключ OpenRouter;
-- `OPENROUTER_MODEL` — модель для chat completions; дефолт `openai/gpt-4.1-mini`;
+- `OPENROUTER_MODEL` — модель для chat completions; дефолт `openai/gpt-4.1-mini`. Если в `.env` случайно указан старый суффикс `:online` (например `openai/gpt-4.1-mini:online`), клиент автоматически использует базовую модель без этого суффикса, потому что web search теперь включается отдельным параметром `OPENROUTER_ENABLE_WEB_SEARCH`;
 - `OPENROUTER_BASE_URL` — базовый URL OpenRouter API;
 - `OPENROUTER_ENABLE_WEB_SEARCH` — включает OpenRouter `openrouter:web_search` server tool для `find_fresh_news()`;
 - `OPENROUTER_WEB_SEARCH_ENGINE` — engine server tool, по умолчанию `auto`;

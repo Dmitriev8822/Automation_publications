@@ -26,6 +26,25 @@ class FailingHTTPClient:
         raise RuntimeError("401 Unauthorized")
 
 
+class FakeHTTPStatusResponse:
+    status_code = 403
+    reason_phrase = "Forbidden"
+
+    def json(self) -> dict:
+        return {"error": {"message": "model access denied"}}
+
+
+class FakeHTTPStatusError(Exception):
+    def __init__(self) -> None:
+        super().__init__("Client error '403 Forbidden'")
+        self.response = FakeHTTPStatusResponse()
+
+
+class FailingHTTPStatusClient:
+    def post(self, url: str, **kwargs):
+        raise FakeHTTPStatusError()
+
+
 class FakeHTTPClient:
     def __init__(self, contents: list[object]) -> None:
         self.contents = contents
@@ -289,7 +308,40 @@ def test_find_fresh_news_stores_error_message_on_request_failure() -> None:
     client = AIClient(settings=make_settings(), http_client=FailingHTTPClient())
 
     assert client.find_fresh_news() == []
-    assert client.last_error_message == "OpenRouter request failed"
+    assert client.last_error_message == "OpenRouter request failed: 401 Unauthorized"
+
+
+def test_find_fresh_news_stores_status_and_body_on_http_status_failure() -> None:
+    client = AIClient(settings=make_settings(), http_client=FailingHTTPStatusClient())
+
+    assert client.find_fresh_news() == []
+    assert client.last_error_message == "OpenRouter request failed with HTTP 403 Forbidden: model access denied"
+
+
+def test_chat_requests_strip_legacy_online_model_suffix() -> None:
+    content = json.dumps(
+        {
+            "title": "AI release",
+            "text": "Fresh Telegram-ready post",
+            "image_prompt": "Editorial illustration of AI automation",
+            "source_url": "https://example.com/ai-release",
+        }
+    )
+    http_client = FakeHTTPClient([content])
+    client = AIClient(
+        settings=make_settings(openrouter_model="openai/gpt-4.1-mini:online"),
+        http_client=http_client,
+    )
+    news = News(
+        title="AI release",
+        source_url="https://example.com/ai-release",
+        source_name="Example",
+        summary="A new AI system was released.",
+    )
+
+    client.generate_post(news)
+
+    assert http_client.requests[0]["json"]["model"] == "openai/gpt-4.1-mini"
 
 
 def test_find_fresh_news_retries_with_json_object_when_json_schema_request_fails() -> None:
