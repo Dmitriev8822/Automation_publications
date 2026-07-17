@@ -306,6 +306,16 @@ def make_plan() -> ContentPlan:
     )
 
 
+def dispatch_text(bot: FakeBot, chat_id: int, text: str) -> None:
+    message = SimpleNamespace(chat=SimpleNamespace(id=chat_id), text=text)
+    for handler in bot.handlers:
+        predicate = handler["kwargs"].get("func")
+        if predicate is None or predicate(message):
+            handler["func"](message)
+            return
+    raise AssertionError(f"No handler matched text: {text}")
+
+
 def test_content_plan_dialog_passes_follow_up_context_until_approval() -> None:
     bot = FakeBot()
     publisher = TelegramPublisher(settings=make_settings(), bot=bot)
@@ -330,6 +340,37 @@ def test_content_plan_dialog_passes_follow_up_context_until_approval() -> None:
     assert calls[1][0] == "план на неделю"
     assert any("добавь больше продающих тем" in item for item in calls[1][1])
     assert len(approved) == 1
+
+
+def test_menu_buttons_interrupt_active_dialogs_without_cross_handling() -> None:
+    bot = FakeBot()
+    publisher = TelegramPublisher(settings=make_settings(), bot=bot)
+    content_plan_calls: list[tuple[str, list[str]]] = []
+    reminder_settings: list[tuple[int | None, int | str]] = []
+
+    def generate(description: str, context: list[str] | None = None) -> ContentPlan:
+        content_plan_calls.append((description, list(context or [])))
+        return make_plan()
+
+    publisher.register_content_plan_handler(generate, lambda plan: None)
+    publisher.register_reminders_handler(
+        lambda minutes, chat_id: reminder_settings.append((minutes, chat_id))
+    )
+
+    dispatch_text(bot, 555, CONTENT_PLAN_BUTTON_TEXT)
+    dispatch_text(bot, 555, REMINDERS_BUTTON_TEXT)
+    dispatch_text(bot, 555, "15")
+
+    assert content_plan_calls == []
+    assert reminder_settings == [(15, 555)]
+    assert "За сколько минут" in bot.sent_messages[-2]["text"]
+    assert "Напомню за 15 минут" in bot.sent_messages[-1]["text"]
+
+    dispatch_text(bot, 555, REMINDERS_BUTTON_TEXT)
+    dispatch_text(bot, 555, CONTENT_PLAN_BUTTON_TEXT)
+    dispatch_text(bot, 555, "план на неделю")
+
+    assert content_plan_calls == [("план на неделю", [])]
 
 
 def test_reminders_dialog_saves_minutes_and_approval_handler_calls_callback() -> None:
