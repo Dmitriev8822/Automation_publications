@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from collections.abc import Callable
 from typing import Any
 
@@ -38,6 +39,7 @@ def create_scheduler(job_func: Callable[[], Any], interval_minutes: int) -> Back
         replace_existing=True,
         max_instances=1,
         coalesce=True,
+        next_run_time=datetime.now(timezone.utc),
     )
     logger.info("Scheduled publication job registered: id=publish_post interval_minutes=%s", interval_minutes)
     return scheduler

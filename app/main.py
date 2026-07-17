@@ -94,7 +94,10 @@ def build_runtime(settings: Settings) -> ApplicationRuntime:
     telegram_publisher = TelegramPublisher(settings)
 
     def scheduled_job():
-        create_and_publish_post(ai_client, telegram_publisher, repository)
+        try:
+            create_and_publish_post(ai_client, telegram_publisher, repository)
+        except Exception:
+            logger.exception("Scheduled news publication failed; continuing with content-plan items")
         publish_due_content_plan_items(telegram_publisher, content_plan_repository)
     manual_job = lambda progress: create_and_publish_post(
         ai_client,

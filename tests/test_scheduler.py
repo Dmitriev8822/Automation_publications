@@ -19,6 +19,68 @@ def test_create_scheduler_uses_requested_interval() -> None:
     assert jobs[0].trigger.interval.total_seconds() == 7 * 60
 
 
+def test_create_scheduler_runs_first_job_immediately() -> None:
+    scheduler = create_scheduler(lambda: None, interval_minutes=7)
+
+    job = scheduler.get_jobs()[0]
+
+    assert job.next_run_time is not None
+
+
+def test_build_runtime_scheduled_job_publishes_content_plan_after_news_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app import main as app_main
+
+    class DummySettings:
+        publish_interval_minutes = 1
+
+    class DummyTelegramPublisher:
+        def __init__(self, settings) -> None:
+            self.settings = settings
+
+        def register_manual_publish_handler(self, handler) -> None:
+            self.manual_handler = handler
+
+        def register_content_plan_handler(self, generator, saver) -> None:
+            self.content_plan_handler = (generator, saver)
+
+    class DummyAIClient:
+        def __init__(self, settings) -> None:
+            self.settings = settings
+
+        def generate_content_plan(self, request: str):
+            return request
+
+    class DummyPostRepository:
+        pass
+
+    class DummyContentPlanRepository:
+        def __init__(self) -> None:
+            self.save_plan = lambda plan: 1
+
+    calls: list[str] = []
+
+    def fake_create_and_publish_post(*args, **kwargs):
+        calls.append("news")
+        raise RuntimeError("news failed")
+
+    def fake_publish_due_content_plan_items(*args, **kwargs):
+        calls.append("content_plan")
+        return []
+
+    monkeypatch.setattr(app_main, "validate_runtime_settings", lambda settings: None)
+    monkeypatch.setattr(app_main, "init_db", lambda: None)
+    monkeypatch.setattr(app_main, "PostRepository", DummyPostRepository)
+    monkeypatch.setattr(app_main, "ContentPlanRepository", DummyContentPlanRepository)
+    monkeypatch.setattr(app_main, "AIClient", DummyAIClient)
+    monkeypatch.setattr(app_main, "TelegramPublisher", DummyTelegramPublisher)
+    monkeypatch.setattr(app_main, "create_and_publish_post", fake_create_and_publish_post)
+    monkeypatch.setattr(app_main, "publish_due_content_plan_items", fake_publish_due_content_plan_items)
+
+    runtime = app_main.build_runtime(DummySettings())
+    runtime.scheduler.get_jobs()[0].func()
+
+    assert calls == ["news", "content_plan"]
+
 def test_create_scheduler_registers_job_function() -> None:
     calls: list[str] = []
     scheduler = create_scheduler(lambda: calls.append("called"), interval_minutes=1)
