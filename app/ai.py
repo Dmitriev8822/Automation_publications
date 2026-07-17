@@ -98,6 +98,7 @@ class AIClient:
                 user_prompt=self._news_user_prompt(),
                 schema=NewsListResponse.model_json_schema(),
                 schema_name="fresh_news",
+                use_web_search=self.settings.openrouter_enable_web_search,
             )
             response = NewsListResponse.model_validate(payload)
         except (AIClientError, ValidationError, TypeError, ValueError) as exc:
@@ -223,8 +224,15 @@ class AIClient:
         logger.info("OpenRouter image generation completed successfully")
         return data
 
-    def _chat_json(self, system_prompt: str, user_prompt: str, schema: dict[str, Any], schema_name: str) -> dict[str, Any]:
-        response = self._post_chat_completion(system_prompt, user_prompt, schema, schema_name)
+    def _chat_json(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        schema: dict[str, Any],
+        schema_name: str,
+        use_web_search: bool = False,
+    ) -> dict[str, Any]:
+        response = self._post_chat_completion(system_prompt, user_prompt, schema, schema_name, use_web_search)
         content = self._extract_message_content(response)
         if isinstance(content, Mapping):
             return dict(content)
@@ -238,7 +246,14 @@ class AIClient:
             raise OpenRouterResponseError("OpenRouter JSON response must be an object")
         return parsed
 
-    def _post_chat_completion(self, system_prompt: str, user_prompt: str, schema: dict[str, Any], schema_name: str) -> dict[str, Any]:
+    def _post_chat_completion(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        schema: dict[str, Any],
+        schema_name: str,
+        use_web_search: bool = False,
+    ) -> dict[str, Any]:
         if not self.settings.openrouter_api_key:
             raise OpenRouterRequestError("OPENROUTER_API_KEY is required for OpenRouter requests")
 
@@ -259,6 +274,8 @@ class AIClient:
                 "json_schema": {"name": schema_name, "strict": True, "schema": schema},
             },
         }
+        if use_web_search:
+            request_payload["tools"] = [self._web_search_tool()]
         headers = {
             "Authorization": f"Bearer {self.settings.openrouter_api_key}",
             "Content-Type": "application/json",
@@ -302,6 +319,12 @@ class AIClient:
             )
             raise OpenRouterRequestError("OpenRouter request failed") from exc
 
+    def _web_search_tool(self) -> dict[str, Any]:
+        parameters: dict[str, Any] = {"max_results": self.settings.openrouter_web_search_max_results}
+        if self.settings.openrouter_web_search_engine:
+            parameters["engine"] = self.settings.openrouter_web_search_engine
+        return {"type": "openrouter:web_search", "parameters": parameters}
+
     @staticmethod
     def _extract_message_content(response: dict[str, Any]) -> Any:
         choices = response.get("choices")
@@ -333,8 +356,9 @@ class AIClient:
 
     def _news_user_prompt(self) -> str:
         return (
-            f"Find up to {self.settings.max_news_items} fresh news items about '{self.settings.news_topic}'. "
+            f"Find up to {self.settings.max_news_items} fresh news items about '{self.settings.news_topic}' using web search. "
             f"Language for news summaries: {self.settings.news_language}. Prioritize relevance and recency. "
+            "Use only web-search-backed sources with real public URLs; do not invent sources, dates or links. "
             "Return JSON object with key 'news'. Each item must include title, source_url, source_name, summary, "
             "and optional ISO-8601 published_at."
         )
