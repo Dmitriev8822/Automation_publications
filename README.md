@@ -89,6 +89,10 @@ README.md
 | `PUBLISH_INTERVAL_MINUTES` | нет | Период публикаций в минутах, минимум `1`. |
 | `OPENROUTER_API_KEY` | да | API-ключ OpenRouter. |
 | `OPENROUTER_MODEL` | нет | Модель OpenRouter для поиска новостей и генерации постов; по умолчанию `openai/gpt-4.1-mini`. |
+| `OPENROUTER_IMAGE_MODEL` | нет | Модель OpenRouter Images API для реальной генерации изображений; по умолчанию `openai/gpt-image-1-mini`. |
+| `OPENROUTER_IMAGE_SIZE` | нет | Опциональный размер изображения; задавайте только если выбранная image-модель поддерживает `size`. |
+| `OPENROUTER_IMAGE_QUALITY` | нет | Качество изображения; по умолчанию `low`, чтобы снизить стоимость. |
+| `OPENROUTER_IMAGE_FORMAT` | нет | Опциональный формат изображения; задавайте только если выбранная image-модель поддерживает `output_format`. |
 | `OPENROUTER_BASE_URL` | нет | Базовый URL OpenRouter API. |
 | `TELEGRAM_BOT_TOKEN` | да | Токен Telegram-бота от BotFather. |
 | `TELEGRAM_CHANNEL_ID` | да | Username канала вида `@channel_name` или числовой идентификатор. |
@@ -100,7 +104,7 @@ README.md
 | `POST_MAX_LENGTH` | нет | Максимальная длина текста поста. |
 | `INCLUDE_SOURCE_LINK` | нет | Добавлять ли ссылку на источник. |
 | `INCLUDE_HASHTAGS` | нет | Добавлять ли хэштеги. |
-| `ENABLE_IMAGE_GENERATION` | нет | Включить генерацию/подготовку изображения. |
+| `ENABLE_IMAGE_GENERATION` | нет | Включить реальную генерацию изображения через OpenRouter Images API. Если важна стоимость, оставьте `false`. |
 
 ## Проверки
 

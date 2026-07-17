@@ -19,7 +19,7 @@ image = ai_client.generate_image(generated_post)
 
 - `find_fresh_news() -> list[News]` — новости уже отсортированы по приоритету публикации, самая подходящая первая.
 - `generate_post(news: News) -> GeneratedPost` — готовый текст поста, заголовок, `image_prompt` и ссылка на источник.
-- `generate_image(post: GeneratedPost) -> ImageAsset | None` — изображение как `data`, `url` или `file_path`; возвращает `None`, если генерация изображений отключена.
+- `generate_image(post: GeneratedPost) -> ImageAsset | None` — реальное изображение из OpenRouter Images API как байты `data` или URL; возвращает `None`, если генерация изображений отключена или API не вернул пригодный файл.
 
 ## OpenRouter API
 
@@ -91,17 +91,24 @@ System prompt задаёт роль генератора безопасного 
 
 Если OpenRouter/модель возвращает `base64_data` или data URL в поле `data`, клиент декодирует строку из base64 в реальные байты изображения перед передачей `ImageAsset` в Telegram. Это важно: отправка base64-строки как обычного UTF-8 текста приводит к невалидному файлу изображения. Если модель вернула только несуществующий `file_path`, клиент логирует предупреждение и возвращает `None`, чтобы сервис опубликовал пост без изображения вместо падения Telegram-публикации с `FileNotFoundError`.
 
-```json
-{
-  "base64_data": "iVBORw0KGgo...",
-  "mime_type": "image/png"
-}
-```
+- `model = OPENROUTER_IMAGE_MODEL`;
+- `prompt` из заголовка, текста поста и `image_prompt`;
+- `n = 1`;
+- `quality = OPENROUTER_IMAGE_QUALITY`, если настройка задана;
+- `size = OPENROUTER_IMAGE_SIZE`, если настройка задана и выбранная модель поддерживает `size`;
+- `output_format = OPENROUTER_IMAGE_FORMAT`, если настройка задана и выбранная модель поддерживает `output_format`.
+
+Ожидаемый ответ OpenRouter содержит `data[0].b64_json` и `media_type`. Клиент декодирует `b64_json` в реальные байты перед передачей `ImageAsset` в Telegram. Если API не вернул изображение, метод логирует предупреждение и возвращает `None`, чтобы сервис мог опубликовать пост без изображения.
 
 ```json
 {
-  "url": "https://example.com/image.png",
-  "mime_type": "image/png"
+  "data": [
+    {
+      "b64_json": "iVBORw0KGgo...",
+      "media_type": "image/png"
+    }
+  ],
+  "usage": {"cost": 0.04}
 }
 ```
 
@@ -126,6 +133,10 @@ System prompt задаёт роль генератора безопасного 
 - `OPENROUTER_API_KEY` — ключ OpenRouter;
 - `OPENROUTER_MODEL` — модель для chat completions; дефолт `openai/gpt-4.1-mini`;
 - `OPENROUTER_BASE_URL` — базовый URL OpenRouter API;
+- `OPENROUTER_IMAGE_MODEL` — отдельная модель для OpenRouter Images API;
+- `OPENROUTER_IMAGE_SIZE` — опциональный размер изображения, если поддерживается выбранной моделью;
+- `OPENROUTER_IMAGE_QUALITY` — качество изображения;
+- `OPENROUTER_IMAGE_FORMAT` — опциональный формат изображения, если поддерживается выбранной моделью;
 - `NEWS_TOPIC` — тема поиска новостей;
 - `NEWS_LANGUAGE` — язык новостного саммари;
 - `POST_LANGUAGE` — язык Telegram-поста;
