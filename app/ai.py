@@ -13,7 +13,7 @@ from typing import Any, Protocol
 from pydantic import BaseModel, Field, ValidationError
 
 from app.config import Settings, get_settings
-from app.schemas import ContentPlan, GeneratedPost, ImageAsset, News
+from app.schemas import ContentPlan, ContentPlanItem, GeneratedPost, ImageAsset, News
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +48,20 @@ class ContentPlanResponse(BaseModel):
     plan: ContentPlan
 
 
+class ContentPlanItemTextResponse(BaseModel):
+    """Structured response expected for content-plan item text regeneration."""
+
+    title: str
+    text: str
+    image_prompt: str = ""
+
+
+class ContentPlanItemImagePromptResponse(BaseModel):
+    """Structured response expected for content-plan item image-prompt regeneration."""
+
+    image_prompt: str
+
+
 class OpenRouterImageItem(BaseModel):
     """Single item returned by OpenRouter's dedicated Image API."""
 
@@ -65,7 +79,9 @@ class OpenRouterImageResponse(BaseModel):
 class AIClient:
     """Client that asks OpenRouter to find news and generate publication assets."""
 
-    def __init__(self, settings: Settings | None = None, http_client: HTTPClient | None = None) -> None:
+    def __init__(
+        self, settings: Settings | None = None, http_client: HTTPClient | None = None
+    ) -> None:
         self.settings = settings or get_settings()
         self.last_error_message: str | None = None
         if http_client is not None:
@@ -74,7 +90,9 @@ class AIClient:
             try:
                 import httpx
             except ModuleNotFoundError as exc:
-                raise OpenRouterRequestError("httpx is required when no custom HTTP client is provided") from exc
+                raise OpenRouterRequestError(
+                    "httpx is required when no custom HTTP client is provided"
+                ) from exc
             self.http_client = httpx.Client(timeout=60)
 
     def find_fresh_news(self) -> list[News]:
@@ -128,30 +146,94 @@ class AIClient:
         try:
             post = GeneratedPost.model_validate(payload)
         except ValidationError as exc:
-            raise OpenRouterResponseError("OpenRouter returned an invalid post payload") from exc
+            raise OpenRouterResponseError(
+                "OpenRouter returned an invalid post payload"
+            ) from exc
 
         if len(post.text) > self.settings.post_max_length:
-            post = post.model_copy(update={"text": post.text[: self.settings.post_max_length].rstrip()})
+            post = post.model_copy(
+                update={"text": post.text[: self.settings.post_max_length].rstrip()}
+            )
         return post
 
-    def generate_content_plan(self, description: str) -> ContentPlan:
-        """Turn a free-form user request into a structured content plan."""
+    def generate_content_plan(
+        self, description: str, dialog_context: list[str] | None = None
+    ) -> ContentPlan:
+        """Turn a free-form user request and optional dialog context into a structured content plan."""
 
         if not description.strip():
             raise ValueError("Content plan description must not be empty")
         logger.info("Requesting content plan generation from OpenRouter")
         payload = self._chat_json(
             system_prompt=self._content_plan_system_prompt(),
-            user_prompt=self._content_plan_user_prompt(description),
+            user_prompt=self._content_plan_user_prompt(description, dialog_context),
             schema=ContentPlanResponse.model_json_schema(),
             schema_name="content_plan",
         )
         try:
             response = ContentPlanResponse.model_validate(payload)
         except ValidationError as exc:
-            raise OpenRouterResponseError("OpenRouter returned an invalid content plan payload") from exc
+            raise OpenRouterResponseError(
+                "OpenRouter returned an invalid content plan payload"
+            ) from exc
         plan = self._normalize_content_plan_datetimes(response.plan)
         return plan.model_copy(update={"raw_request": description})
+
+    def regenerate_content_plan_item_text(
+        self, item: ContentPlanItem, instruction: str = ""
+    ) -> ContentPlanItem:
+        """Regenerate text and image prompt for a scheduled content-plan item."""
+
+        prompt = (
+            f"Rewrite this Telegram post in {self.settings.post_language}. "
+            f"Keep the scheduled time {item.scheduled_at.isoformat()}. "
+            f"User instruction: {instruction or 'improve the post while preserving the topic'}. "
+            f"Current title: {item.title}. Current text: {item.text}. Current image prompt: {item.image_prompt}. "
+            "Return JSON with title, text and image_prompt."
+        )
+        payload = self._chat_json(
+            system_prompt="Return only JSON. You rewrite approved Telegram content-plan posts.",
+            user_prompt=prompt,
+            schema=ContentPlanItemTextResponse.model_json_schema(),
+            schema_name="content_plan_item_text",
+        )
+        try:
+            response = ContentPlanItemTextResponse.model_validate(payload)
+        except ValidationError as exc:
+            raise OpenRouterResponseError(
+                "OpenRouter returned an invalid regenerated content-plan item"
+            ) from exc
+        return item.model_copy(
+            update={
+                "title": response.title,
+                "text": response.text,
+                "image_prompt": response.image_prompt,
+            }
+        )
+
+    def regenerate_content_plan_item_image_prompt(
+        self, item: ContentPlanItem, instruction: str = ""
+    ) -> ContentPlanItem:
+        """Regenerate only the image prompt for a scheduled content-plan item."""
+
+        prompt = (
+            f"Create a new image prompt for this Telegram post. User instruction: {instruction or 'make it clearer and more vivid'}. "
+            f"Title: {item.title}. Text: {item.text}. Current image prompt: {item.image_prompt}. "
+            "Return JSON with image_prompt."
+        )
+        payload = self._chat_json(
+            system_prompt="Return only JSON. You create safe editorial image prompts for Telegram posts.",
+            user_prompt=prompt,
+            schema=ContentPlanItemImagePromptResponse.model_json_schema(),
+            schema_name="content_plan_item_image_prompt",
+        )
+        try:
+            response = ContentPlanItemImagePromptResponse.model_validate(payload)
+        except ValidationError as exc:
+            raise OpenRouterResponseError(
+                "OpenRouter returned an invalid regenerated image prompt"
+            ) from exc
+        return item.model_copy(update={"image_prompt": response.image_prompt})
 
     def generate_image(self, post: GeneratedPost) -> ImageAsset | None:
         """Generate an image asset through OpenRouter's dedicated Image API."""
@@ -170,27 +252,38 @@ class AIClient:
         try:
             image_response = OpenRouterImageResponse.model_validate(payload)
         except ValidationError as exc:
-            raise OpenRouterResponseError("OpenRouter returned an invalid image generation payload") from exc
+            raise OpenRouterResponseError(
+                "OpenRouter returned an invalid image generation payload"
+            ) from exc
 
         if not image_response.data:
-            logger.warning("OpenRouter Image API returned no image data for source_url=%s", post.source_url)
+            logger.warning(
+                "OpenRouter Image API returned no image data for source_url=%s",
+                post.source_url,
+            )
             return None
 
         item = image_response.data[0]
         image_data = self._decode_image_data(item.b64_json)
         if image_data is None and item.url is None:
-            logger.warning("OpenRouter Image API returned an empty image item for source_url=%s", post.source_url)
+            logger.warning(
+                "OpenRouter Image API returned an empty image item for source_url=%s",
+                post.source_url,
+            )
             return None
 
         return ImageAsset(
             data=image_data,
             url=item.url,
-            mime_type=item.media_type or self._mime_type_from_format(self.settings.openrouter_image_format),
+            mime_type=item.media_type
+            or self._mime_type_from_format(self.settings.openrouter_image_format),
         )
 
     def _post_image_generation(self, post: GeneratedPost) -> dict[str, Any]:
         if not self.settings.openrouter_api_key:
-            raise OpenRouterRequestError("OPENROUTER_API_KEY is required for OpenRouter image requests")
+            raise OpenRouterRequestError(
+                "OPENROUTER_API_KEY is required for OpenRouter image requests"
+            )
 
         request_payload = {
             "model": self.settings.openrouter_image_model,
@@ -208,21 +301,31 @@ class AIClient:
             "Content-Type": "application/json",
         }
         try:
-            response = self.http_client.post(self.settings.image_generation_url, json=request_payload, headers=headers)
+            response = self.http_client.post(
+                self.settings.image_generation_url,
+                json=request_payload,
+                headers=headers,
+            )
             if hasattr(response, "raise_for_status"):
                 response.raise_for_status()
             data = response.json() if hasattr(response, "json") else response
-        except Exception as exc:  # noqa: BLE001 - normalize third-party/client errors for callers
+        except (
+            Exception
+        ) as exc:  # noqa: BLE001 - normalize third-party/client errors for callers
             logger.warning(
                 "OpenRouter image generation request failed: endpoint=%s model=%s error=%s",
                 self.settings.image_generation_url,
                 self.settings.openrouter_image_model,
                 exc,
             )
-            raise OpenRouterRequestError("OpenRouter image generation request failed") from exc
+            raise OpenRouterRequestError(
+                "OpenRouter image generation request failed"
+            ) from exc
 
         if not isinstance(data, dict):
-            raise OpenRouterResponseError("OpenRouter image generation response must be a JSON object")
+            raise OpenRouterResponseError(
+                "OpenRouter image generation response must be a JSON object"
+            )
         logger.info("OpenRouter image generation completed successfully")
         return data
 
@@ -234,7 +337,9 @@ class AIClient:
         schema_name: str,
         use_web_search: bool = False,
     ) -> dict[str, Any]:
-        response = self._post_chat_completion(system_prompt, user_prompt, schema, schema_name, use_web_search)
+        response = self._post_chat_completion(
+            system_prompt, user_prompt, schema, schema_name, use_web_search
+        )
         content = self._extract_message_content(response)
         if isinstance(content, Mapping):
             return dict(content)
@@ -257,7 +362,9 @@ class AIClient:
         use_web_search: bool = False,
     ) -> dict[str, Any]:
         if not self.settings.openrouter_api_key:
-            raise OpenRouterRequestError("OPENROUTER_API_KEY is required for OpenRouter requests")
+            raise OpenRouterRequestError(
+                "OPENROUTER_API_KEY is required for OpenRouter requests"
+            )
 
         logger.info(
             "Sending OpenRouter chat completion request: endpoint=%s model=%s schema=%s",
@@ -284,7 +391,9 @@ class AIClient:
         }
 
         try:
-            data = self._send_chat_completion_request(request_payload, headers, schema_name)
+            data = self._send_chat_completion_request(
+                request_payload, headers, schema_name
+            )
         except OpenRouterRequestError:
             logger.warning(
                 "Retrying OpenRouter request with json_object response format: model=%s schema=%s",
@@ -293,7 +402,9 @@ class AIClient:
             )
             fallback_payload = dict(request_payload)
             fallback_payload["response_format"] = {"type": "json_object"}
-            data = self._send_chat_completion_request(fallback_payload, headers, schema_name)
+            data = self._send_chat_completion_request(
+                fallback_payload, headers, schema_name
+            )
 
         if not isinstance(data, dict):
             raise OpenRouterResponseError("OpenRouter response must be a JSON object")
@@ -307,11 +418,17 @@ class AIClient:
         schema_name: str,
     ) -> dict[str, Any]:
         try:
-            response = self.http_client.post(self.settings.chat_completions_url, json=request_payload, headers=headers)
+            response = self.http_client.post(
+                self.settings.chat_completions_url,
+                json=request_payload,
+                headers=headers,
+            )
             if hasattr(response, "raise_for_status"):
                 response.raise_for_status()
             return response.json() if hasattr(response, "json") else response
-        except Exception as exc:  # noqa: BLE001 - normalize third-party/client errors for callers
+        except (
+            Exception
+        ) as exc:  # noqa: BLE001 - normalize third-party/client errors for callers
             logger.warning(
                 "OpenRouter request failed: endpoint=%s model=%s schema=%s error=%s",
                 self.settings.chat_completions_url,
@@ -322,7 +439,9 @@ class AIClient:
             raise OpenRouterRequestError("OpenRouter request failed") from exc
 
     def _web_search_tool(self) -> dict[str, Any]:
-        parameters: dict[str, Any] = {"max_results": self.settings.openrouter_web_search_max_results}
+        parameters: dict[str, Any] = {
+            "max_results": self.settings.openrouter_web_search_max_results
+        }
         if self.settings.openrouter_web_search_engine:
             parameters["engine"] = self.settings.openrouter_web_search_engine
         return {"type": "openrouter:web_search", "parameters": parameters}
@@ -331,10 +450,14 @@ class AIClient:
     def _extract_message_content(response: dict[str, Any]) -> Any:
         choices = response.get("choices")
         if not isinstance(choices, list) or not choices:
-            raise OpenRouterResponseError("OpenRouter response does not contain choices")
+            raise OpenRouterResponseError(
+                "OpenRouter response does not contain choices"
+            )
         message = choices[0].get("message") if isinstance(choices[0], dict) else None
         if not isinstance(message, dict):
-            raise OpenRouterResponseError("OpenRouter response does not contain a message")
+            raise OpenRouterResponseError(
+                "OpenRouter response does not contain a message"
+            )
         return message.get("content")
 
     @staticmethod
@@ -347,11 +470,15 @@ class AIClient:
         if image_data.startswith("data:"):
             _, separator, image_data = image_data.partition(",")
             if not separator:
-                raise OpenRouterResponseError("OpenRouter returned an invalid data URL for image")
+                raise OpenRouterResponseError(
+                    "OpenRouter returned an invalid data URL for image"
+                )
         try:
             return base64.b64decode(image_data, validate=True)
         except (binascii.Error, ValueError) as exc:
-            raise OpenRouterResponseError("OpenRouter image data must be base64-encoded bytes") from exc
+            raise OpenRouterResponseError(
+                "OpenRouter image data must be base64-encoded bytes"
+            ) from exc
 
     def _news_system_prompt(self) -> str:
         return "Return only JSON. You are a news editor selecting fresh, reliable and publication-ready news."
@@ -368,8 +495,14 @@ class AIClient:
     def _content_plan_system_prompt(self) -> str:
         return "Return only JSON. You are a Telegram channel editor planning scheduled posts."
 
-    def _content_plan_user_prompt(self, description: str) -> str:
+    def _content_plan_user_prompt(
+        self, description: str, dialog_context: list[str] | None = None
+    ) -> str:
         now = datetime.now(self.settings.timezone)
+        context = "\n".join(dialog_context or [])
+        context_part = (
+            f" Conversation context and revisions: {context}." if context else ""
+        )
         return (
             f"Convert this free-form content plan request into a structured plan in {self.settings.post_language}. "
             f"Current application time is {now.isoformat()} in timezone {self.settings.app_timezone}. "
@@ -377,9 +510,9 @@ class AIClient:
             "Choose explicit ISO-8601 scheduled_at timestamps with UTC offset for every item, keep posts Telegram-ready, "
             "and return JSON object with key 'plan'. Plan fields: title, period_start, period_end, items. "
             "Each item fields: scheduled_at, title, text, image_prompt, optional source_url. "
-            f"User request: {description}"
+            f"User request: {description}."
+            f"{context_part}"
         )
-
 
     def _normalize_content_plan_datetimes(self, plan: ContentPlan) -> ContentPlan:
         """Normalize AI-produced naive datetimes to the configured app timezone."""
@@ -396,7 +529,10 @@ class AIClient:
                 "period_start": normalize(plan.period_start),
                 "period_end": normalize(plan.period_end),
                 "items": [
-                    item.model_copy(update={"scheduled_at": normalize(item.scheduled_at)}) for item in plan.items
+                    item.model_copy(
+                        update={"scheduled_at": normalize(item.scheduled_at)}
+                    )
+                    for item in plan.items
                 ],
             }
         )

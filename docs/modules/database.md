@@ -108,3 +108,13 @@ if not repository.is_published(str(post.source_url)):
 - `mark_item_failed(item_id: int, error_message: str) -> ContentPlanItem` — фиксирует ошибку публикации пункта.
 
 Пункты плана имеют статусы `scheduled`, `published`, `failed`. `init_db()` создает таблицы контент-планов вместе с таблицей публикаций.
+
+## Отмена и редактирование пунктов контент-плана
+
+Для предпубликационного согласования добавлен статус `cancelled`: пункт не будет опубликован после отказа пользователя.
+
+`ContentPlanRepository` дополнительно предоставляет методы:
+
+- `get_item(item_id: int) -> ContentPlanItem` — загрузить один пункт для напоминания или ручного действия;
+- `update_item_content(item_id: int, item: ContentPlanItem) -> ContentPlanItem` — сохранить обновленные AI заголовок, текст и `image_prompt`;
+- `mark_item_cancelled(item_id: int, error_message: str | None = None) -> ContentPlanItem` — отменить публикацию пункта.

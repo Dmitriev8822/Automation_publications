@@ -125,12 +125,15 @@ def test_publish_post_with_image_url() -> None:
     assert bot.sent_photos[0]["photo"] == "https://example.com/image.png"
 
 
-
 def test_publish_post_falls_back_to_text_when_telegram_cannot_process_image() -> None:
     image_error = ApiTelegramException(
         "sendPhoto",
         object(),
-        {"ok": False, "error_code": 400, "description": "Bad Request: IMAGE_PROCESS_FAILED"},
+        {
+            "ok": False,
+            "error_code": 400,
+            "description": "Bad Request: IMAGE_PROCESS_FAILED",
+        },
     )
     bot = FakeBot(photo_error=image_error)
     publisher = TelegramPublisher(settings=make_settings(), bot=bot)
@@ -148,7 +151,9 @@ def test_publish_post_falls_back_to_text_when_telegram_cannot_process_image() ->
 def test_publish_post_propagates_telegram_error_with_clear_message() -> None:
     publisher = TelegramPublisher(settings=make_settings(), bot=FakeBot(fail=True))
 
-    with pytest.raises(RuntimeError, match="Telegram publication failed: telegram is unavailable"):
+    with pytest.raises(
+        RuntimeError, match="Telegram publication failed: telegram is unavailable"
+    ):
         publisher.publish_post(make_post())
 
 
@@ -182,7 +187,9 @@ def test_register_manual_publish_handler_sends_button_and_progress_messages() ->
 
     start_handler = bot.handlers[0]["func"]
     publish_handler = bot.handlers[1]["func"]
-    message = SimpleNamespace(chat=SimpleNamespace(id=555), text=MANUAL_PUBLISH_BUTTON_TEXT)
+    message = SimpleNamespace(
+        chat=SimpleNamespace(id=555), text=MANUAL_PUBLISH_BUTTON_TEXT
+    )
 
     start_handler(message)
     publish_handler(message)
@@ -202,9 +209,14 @@ def test_manual_publish_handler_reports_no_news() -> None:
     publisher.register_manual_publish_handler(lambda progress: None)
 
     publish_handler = bot.handlers[1]["func"]
-    publish_handler(SimpleNamespace(chat=SimpleNamespace(id=555), text=MANUAL_PUBLISH_BUTTON_TEXT))
+    publish_handler(
+        SimpleNamespace(chat=SimpleNamespace(id=555), text=MANUAL_PUBLISH_BUTTON_TEXT)
+    )
 
-    assert bot.sent_messages[-1]["text"] == "ℹ️ Публикация не выполнена: нет новых новостей."
+    assert (
+        bot.sent_messages[-1]["text"]
+        == "ℹ️ Публикация не выполнена: нет новых новостей."
+    )
 
 
 def test_manual_publish_handler_reports_error_without_reraising() -> None:
@@ -217,9 +229,14 @@ def test_manual_publish_handler_reports_error_without_reraising() -> None:
     publisher.register_manual_publish_handler(fail_publish)
     publish_handler = bot.handlers[1]["func"]
 
-    publish_handler(SimpleNamespace(chat=SimpleNamespace(id=555), text=MANUAL_PUBLISH_BUTTON_TEXT))
+    publish_handler(
+        SimpleNamespace(chat=SimpleNamespace(id=555), text=MANUAL_PUBLISH_BUTTON_TEXT)
+    )
 
-    assert bot.sent_messages[-1]["text"] == "❌ Публикация завершилась ошибкой: openrouter unavailable"
+    assert (
+        bot.sent_messages[-1]["text"]
+        == "❌ Публикация завершилась ошибкой: openrouter unavailable"
+    )
 
 
 def test_start_manual_polling_delegates_to_bot() -> None:
@@ -263,3 +280,81 @@ def test_validate_bot_token_reports_invalid_token_clearly() -> None:
 
     with pytest.raises(RuntimeError, match="python app/main.py --check-telegram"):
         publisher.validate_bot_token()
+
+
+from app.telegram import (
+    CONTENT_PLAN_BUTTON_TEXT,
+    REMINDERS_BUTTON_TEXT,
+    APPROVE_REMINDER_BUTTON_TEXT,
+)
+from app.schemas import ContentPlan, ContentPlanItem
+from datetime import datetime, timezone
+
+
+def make_plan() -> ContentPlan:
+    now = datetime.now(timezone.utc)
+    return ContentPlan(
+        title="План",
+        period_start=now,
+        period_end=now,
+        items=[
+            ContentPlanItem(
+                scheduled_at=now, title="Пост", text="Текст", image_prompt="Картинка"
+            )
+        ],
+    )
+
+
+def test_content_plan_dialog_passes_follow_up_context_until_approval() -> None:
+    bot = FakeBot()
+    publisher = TelegramPublisher(settings=make_settings(), bot=bot)
+    calls: list[tuple[str, list[str]]] = []
+    approved: list[ContentPlan] = []
+
+    def generate(description: str, context: list[str] | None = None) -> ContentPlan:
+        calls.append((description, list(context or [])))
+        return make_plan()
+
+    publisher.register_content_plan_handler(generate, approved.append)
+    start_handler = bot.handlers[0]["func"]
+    dialog_handler = bot.handlers[1]["func"]
+    chat = SimpleNamespace(id=555)
+
+    start_handler(SimpleNamespace(chat=chat, text=CONTENT_PLAN_BUTTON_TEXT))
+    dialog_handler(SimpleNamespace(chat=chat, text="план на неделю"))
+    dialog_handler(SimpleNamespace(chat=chat, text="добавь больше продающих тем"))
+    dialog_handler(SimpleNamespace(chat=chat, text="✅ Согласовать"))
+
+    assert calls[0] == ("план на неделю", [])
+    assert calls[1][0] == "план на неделю"
+    assert any("добавь больше продающих тем" in item for item in calls[1][1])
+    assert len(approved) == 1
+
+
+def test_reminders_dialog_saves_minutes_and_approval_handler_calls_callback() -> None:
+    bot = FakeBot()
+    publisher = TelegramPublisher(settings=make_settings(), bot=bot)
+    configured: list[int] = []
+    approved: list[int] = []
+
+    publisher.register_reminders_handler(configured.append)
+    publisher.register_publication_approval_handler(
+        approved.append,
+        lambda item_id: None,
+        lambda item_id: make_plan().items[0],
+        lambda item_id: make_plan().items[0],
+    )
+    reminders_start = bot.handlers[0]["func"]
+    reminders_dialog = bot.handlers[1]["func"]
+    approval_handler = bot.handlers[2]["func"]
+    chat = SimpleNamespace(id=777)
+
+    reminders_start(SimpleNamespace(chat=chat, text=REMINDERS_BUTTON_TEXT))
+    reminders_dialog(SimpleNamespace(chat=chat, text="15"))
+    publisher.send_publication_reminder(777, 42, make_plan().items[0])
+    approval_handler(SimpleNamespace(chat=chat, text=APPROVE_REMINDER_BUTTON_TEXT))
+
+    assert publisher.reminder_minutes_before == 15
+    assert publisher.reminder_chat_id == 777
+    assert configured == [15]
+    assert approved == [42]

@@ -17,8 +17,20 @@ import pytest
 from app.ai import AIClient
 from app.config import Settings, get_settings, validate_runtime_settings
 from app.database import ContentPlanRepository, PostRepository, init_db
-from app.scheduler import add_content_plan_item_jobs, create_content_plan_scheduler, create_scheduler
-from app.service import create_and_publish_post, publish_due_content_plan_items
+from app.scheduler import (
+    add_content_plan_item_jobs,
+    add_content_plan_reminder_jobs,
+    create_content_plan_scheduler,
+    create_scheduler,
+)
+from app.service import (
+    approve_content_plan_item_publication,
+    create_and_publish_post,
+    publish_due_content_plan_items,
+    regenerate_content_plan_item_image,
+    regenerate_content_plan_item_text,
+    reject_content_plan_item_publication,
+)
 from app.telegram import TelegramPublisher
 
 logger = logging.getLogger(__name__)
@@ -48,7 +60,9 @@ def run_startup_tests(args: Sequence[str] = STARTUP_TEST_ARGS) -> bool:
 
     logger.info("Running startup tests: pytest %s", " ".join(args))
     root_logger = logging.getLogger()
-    previous_handler_levels = [(handler, handler.level) for handler in root_logger.handlers]
+    previous_handler_levels = [
+        (handler, handler.level) for handler in root_logger.handlers
+    ]
     for handler, _level in previous_handler_levels:
         handler.setLevel(logging.CRITICAL + 1)
     try:
@@ -94,7 +108,9 @@ def build_runtime(settings: Settings) -> ApplicationRuntime:
     telegram_publisher = TelegramPublisher(settings)
 
     def scheduled_content_plan_job():
-        publish_due_content_plan_items(telegram_publisher, content_plan_repository)
+        publish_due_content_plan_items(
+            telegram_publisher, content_plan_repository, ai_client
+        )
 
     manual_job = lambda progress: create_and_publish_post(
         ai_client,
@@ -119,16 +135,58 @@ def build_runtime(settings: Settings) -> ApplicationRuntime:
         )
         return plan_id
 
-    telegram_publisher.register_content_plan_handler(ai_client.generate_content_plan, save_content_plan_and_schedule)
+    telegram_publisher.register_content_plan_handler(
+        ai_client.generate_content_plan, save_content_plan_and_schedule
+    )
 
-    logger.info("Content-plan scheduler created with %d job(s)", len(scheduler.get_jobs()))
-    return ApplicationRuntime(scheduler=scheduler, telegram_publisher=telegram_publisher)
+    def reminder_job(item_id: int):
+        if telegram_publisher.reminder_chat_id is None:
+            return
+        item = content_plan_repository.get_item(item_id)
+        telegram_publisher.send_publication_reminder(
+            telegram_publisher.reminder_chat_id, item_id, item
+        )
+
+    def configure_reminders(minutes: int):
+        add_content_plan_reminder_jobs(
+            scheduler,
+            reminder_job,
+            content_plan_repository.get_scheduled_item_slots(),
+            minutes,
+        )
+
+    if hasattr(telegram_publisher, "register_reminders_handler"):
+        telegram_publisher.register_reminders_handler(configure_reminders)
+    if hasattr(telegram_publisher, "register_publication_approval_handler"):
+        telegram_publisher.register_publication_approval_handler(
+            lambda item_id: approve_content_plan_item_publication(
+                item_id, telegram_publisher, content_plan_repository, ai_client
+            ),
+            lambda item_id: reject_content_plan_item_publication(
+                item_id, content_plan_repository
+            ),
+            lambda item_id: regenerate_content_plan_item_text(
+                item_id, ai_client, content_plan_repository
+            ),
+            lambda item_id: regenerate_content_plan_item_image(
+                item_id, ai_client, content_plan_repository
+            ),
+        )
+
+    logger.info(
+        "Content-plan scheduler created with %d job(s)", len(scheduler.get_jobs())
+    )
+    return ApplicationRuntime(
+        scheduler=scheduler, telegram_publisher=telegram_publisher
+    )
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     """Parse application command-line arguments."""
 
-    parser = argparse.ArgumentParser(description="Run the Telegram publication automation service.")
+    parser = argparse.ArgumentParser(
+        description="Run the Telegram publication automation service."
+    )
     parser.add_argument(
         "--check",
         action="store_true",
