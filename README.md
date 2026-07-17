@@ -86,7 +86,8 @@ README.md
 | `APP_ENV` | да | Окружение: `dev`, `test` или `prod`. Для реального запуска используйте `prod`. |
 | `LOG_LEVEL` | нет | Уровень логирования, например `INFO` или `DEBUG`. |
 | `DATABASE_URL` | нет | SQLite URL, по умолчанию `sqlite:///./data/publications.db`. |
-| `PUBLISH_INTERVAL_MINUTES` | нет | Период публикаций в минутах, минимум `1`. |
+| `PUBLISH_INTERVAL_MINUTES` | нет | Legacy-период публикаций в минутах, минимум `1`. |
+| `APP_TIMEZONE` | нет | IANA timezone для времен контент-плана без явного offset, по умолчанию `Europe/Moscow`. |
 | `OPENROUTER_API_KEY` | да | API-ключ OpenRouter. |
 | `OPENROUTER_MODEL` | нет | Модель OpenRouter для поиска новостей и генерации постов; по умолчанию `openai/gpt-4.1-mini`. |
 | `OPENROUTER_IMAGE_MODEL` | нет | Модель OpenRouter Images API для реальной генерации изображений; по умолчанию `openai/gpt-image-1-mini`. |

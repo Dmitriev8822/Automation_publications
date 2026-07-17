@@ -1,49 +1,57 @@
 # Модуль Scheduler
 
-`app.scheduler` отвечает только за настройку периодического запуска публикации.
-
-## `create_scheduler(job_func, interval_minutes)`
-
-Функция создает `apscheduler.schedulers.background.BackgroundScheduler` и регистрирует один interval-job:
-
-- идентификатор job: `publish_post`;
-- интервал берется из `interval_minutes`;
-- `max_instances=1` не допускает параллельные запуски одной публикации;
-- `coalesce=True` объединяет пропущенные запуски после задержек;
-- `next_run_time=datetime.now(timezone.utc)` запускает первую проверку сразу после старта scheduler, а не только через первый полный интервал. Это важно для пунктов контент-плана, время которых уже наступило, пока приложение было остановлено.
-
-Переданная бизнес-функция оборачивается в защитный обработчик. Если публикация завершится ошибкой, исключение логируется через `logger.exception`, но не пробрасывается наружу из job. Благодаря этому scheduler продолжает работать и выполнит следующие запуски по расписанию.
-
-Модуль не содержит бизнес-логики публикации: создание новости, генерация поста, отправка в Telegram и сохранение статусов остаются в `app.service` и зависимых адаптерах.
-
 ## Назначение
 
-См. описание выше в этом документе.
+`app.scheduler` отвечает только за настройку APScheduler jobs. Актуальный режим для контент-плана — отдельный `date`-job на каждый пункт плана: пост публикуется в собственное поле `scheduled_at`, а не во время общей проверки раз в `PUBLISH_INTERVAL_MINUTES`.
+
+Старый interval-scheduler для новостных публикаций оставлен как заготовка `create_scheduler(...)`, но больше не используется в актуальном `build_runtime()` приложения.
 
 ## Публичные классы и функции
 
-См. описание выше в этом документе.
+- `create_content_plan_scheduler(job_func, scheduled_items=None) -> BackgroundScheduler` — создает scheduler и регистрирует `date`-jobs для переданных пар `(item_id, scheduled_at)`.
+- `add_content_plan_item_jobs(scheduler, job_func, scheduled_items) -> None` — добавляет или заменяет `date`-jobs вида `content_plan_item_<id>`. Используется при старте приложения и после сохранения нового контент-плана.
+- `create_scheduler(job_func, interval_minutes) -> BackgroundScheduler` — legacy-заготовка interval-job `publish_post`; сохранена для будущего возврата периодической публикации, но не подключена к основному runtime.
+
+Все job-функции оборачиваются защитным обработчиком: исключения логируются через `logger.exception`, но не пробрасываются наружу, чтобы scheduler продолжал работать.
 
 ## Используемые настройки
 
-См. описание выше в этом документе.
+Актуальный scheduler контент-плана не использует `PUBLISH_INTERVAL_MINUTES` для публикаций. Время берется из БД: `ContentPlanItem.scheduled_at`. Если AI/пользователь дал время без UTC offset, оно нормализуется через `APP_TIMEZONE`, затем хранится и планируется в этом timezone.
+
+`PUBLISH_INTERVAL_MINUTES` остается только для legacy-функции `create_scheduler(...)`.
 
 ## Взаимодействие с другими модулями
 
-См. описание выше в этом документе.
+`app.main.build_runtime()`:
+
+1. Создает `ContentPlanRepository`.
+2. Берет сохраненные слоты через `content_plan_repository.get_scheduled_item_slots()`.
+3. Создает scheduler через `create_content_plan_scheduler(...)`.
+4. Оборачивает сохранение нового плана так, чтобы после `save_plan(...)` вызвать `add_content_plan_item_jobs(...)` и зарегистрировать новые точные времена запуска.
+
+`app.scheduler` не содержит бизнес-логики публикации. Фактическая публикация due-пунктов остается в `app.service.publish_due_content_plan_items(...)`.
 
 ## Обработка ошибок
 
-См. описание выше в этом документе.
+Если job публикации падает, исключение логируется, но не останавливает scheduler. Ошибки отдельных пунктов контент-плана дополнительно обрабатываются в `app.service`: пункт помечается как `failed`, а обработка следующих пунктов продолжается.
 
 ## Тестирование
 
-См. описание выше в этом документе.
+Релевантные проверки:
+
+```bash
+pytest tests/test_scheduler.py
+pytest tests/test_database.py
+```
+
+Тесты проверяют legacy interval-заготовку, регистрацию `date`-jobs для контент-плана и то, что `build_runtime()` больше не запускает периодическую новостную публикацию.
 
 ## Пример использования
 
-См. описание выше в этом документе.
+```python
+from app.scheduler import create_content_plan_scheduler, add_content_plan_item_jobs
 
-## Консольное логирование
-
-Scheduler пишет INFO-логи при создании расписания, регистрации job, старте и успешном завершении каждого планового запуска. Первый запуск выполняется сразу после старта scheduler, затем повторяется с интервалом `publish_interval_minutes`. Исключения job логируются через `logger.exception`, но не останавливают последующие запуски.
+scheduler = create_content_plan_scheduler(publish_due_items, [(5, scheduled_at)])
+add_content_plan_item_jobs(scheduler, publish_due_items, [(6, another_time)])
+scheduler.start()
+```
