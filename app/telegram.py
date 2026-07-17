@@ -27,6 +27,24 @@ REGENERATE_REMINDER_TEXT_BUTTON_TEXT = "✍️ Перегенерировать 
 REGENERATE_REMINDER_IMAGE_BUTTON_TEXT = "🖼️ Перегенерировать картинку"
 TELEGRAM_UNAUTHORIZED_CODE = 401
 
+MAIN_MENU_BUTTON_TEXTS = {
+    MANUAL_PUBLISH_BUTTON_TEXT,
+    CONTENT_PLAN_BUTTON_TEXT,
+    REMINDERS_BUTTON_TEXT,
+}
+
+CONTENT_PLAN_DIALOG_BUTTON_TEXTS = {
+    REGENERATE_CONTENT_PLAN_BUTTON_TEXT,
+    APPROVE_CONTENT_PLAN_BUTTON_TEXT,
+}
+
+REMINDER_APPROVAL_BUTTON_TEXTS = {
+    APPROVE_REMINDER_BUTTON_TEXT,
+    REJECT_REMINDER_BUTTON_TEXT,
+    REGENERATE_REMINDER_TEXT_BUTTON_TEXT,
+    REGENERATE_REMINDER_IMAGE_BUTTON_TEXT,
+}
+
 logger = logging.getLogger(__name__)
 
 
@@ -179,6 +197,7 @@ class TelegramPublisher:
         def handle_content_plan_start(message: Any) -> None:
             chat_id = self._message_chat_id(message)
             chat_key = self._chat_key(chat_id)
+            self._reminder_dialogs.pop(chat_key, None)
             self._content_plan_dialogs[chat_key] = {"awaiting_description": True}
             self._send_control_message(
                 chat_id,
@@ -223,6 +242,8 @@ class TelegramPublisher:
             self._generate_and_send_content_plan(chat_id, state, generate_callback)
 
     def _is_content_plan_dialog_message(self, message: Any) -> bool:
+        if self._message_text(message) in MAIN_MENU_BUTTON_TEXTS:
+            return False
         chat_key = self._message_chat_key(message)
         return chat_key in self._content_plan_dialogs
 
@@ -283,6 +304,7 @@ class TelegramPublisher:
         def handle_reminders_start(message: Any) -> None:
             chat_id = self._message_chat_id(message)
             chat_key = self._chat_key(chat_id)
+            self._content_plan_dialogs.pop(chat_key, None)
             self._reminder_dialogs[chat_key] = {"awaiting_minutes": True}
             self._send_control_message(
                 chat_id,
@@ -326,6 +348,9 @@ class TelegramPublisher:
             )
 
     def _is_reminder_dialog_message(self, message: Any) -> bool:
+        text = self._message_text(message)
+        if text in MAIN_MENU_BUTTON_TEXTS or text in CONTENT_PLAN_DIALOG_BUTTON_TEXTS:
+            return False
         return self._message_chat_key(message) in self._reminder_dialogs
 
     def send_publication_reminder(
@@ -386,13 +411,8 @@ class TelegramPublisher:
         """Register controls shown in pre-publication reminders."""
 
         @self.bot.message_handler(
-            func=lambda message: getattr(message, "text", None)
-            in {
-                APPROVE_REMINDER_BUTTON_TEXT,
-                REJECT_REMINDER_BUTTON_TEXT,
-                REGENERATE_REMINDER_TEXT_BUTTON_TEXT,
-                REGENERATE_REMINDER_IMAGE_BUTTON_TEXT,
-            }
+            func=lambda message: self._message_text(message)
+            in REMINDER_APPROVAL_BUTTON_TEXTS
         )
         def handle_publication_approval(message: Any) -> None:
             chat_id = self._message_chat_id(message)
@@ -534,3 +554,7 @@ class TelegramPublisher:
         if chat_id is None:
             raise RuntimeError("Telegram message does not contain chat.id")
         return chat_id
+
+    @staticmethod
+    def _message_text(message: Any) -> str | None:
+        return getattr(message, "text", None)
