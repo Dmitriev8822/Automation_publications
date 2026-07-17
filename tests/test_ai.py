@@ -90,6 +90,53 @@ def test_find_fresh_news_parses_successful_response() -> None:
     assert news[0].title == "AI release"
 
 
+def test_find_fresh_news_uses_openrouter_web_search_tool() -> None:
+    content = json.dumps({"news": []})
+    http_client = FakeHTTPClient([content])
+    client = AIClient(
+        settings=make_settings(
+            openrouter_enable_web_search=True,
+            openrouter_web_search_engine="native",
+            openrouter_web_search_max_results=3,
+        ),
+        http_client=http_client,
+    )
+
+    assert client.find_fresh_news() == []
+
+    payload = http_client.requests[0]["json"]
+    assert payload["tools"] == [
+        {
+            "type": "openrouter:web_search",
+            "parameters": {"max_results": 3, "engine": "native"},
+        }
+    ]
+    assert "using web search" in payload["messages"][1]["content"]
+
+
+def test_generate_post_does_not_use_web_search_tool() -> None:
+    content = json.dumps(
+        {
+            "title": "AI release",
+            "text": "Fresh Telegram-ready post",
+            "image_prompt": "Editorial illustration of AI automation",
+            "source_url": "https://example.com/ai-release",
+        }
+    )
+    http_client = FakeHTTPClient([content])
+    client = AIClient(settings=make_settings(openrouter_enable_web_search=True), http_client=http_client)
+    news = News(
+        title="AI release",
+        source_url="https://example.com/ai-release",
+        source_name="Example",
+        summary="A new AI system was released.",
+    )
+
+    client.generate_post(news)
+
+    assert "tools" not in http_client.requests[0]["json"]
+
+
 def test_generate_post_parses_generated_post() -> None:
     content = json.dumps(
         {

@@ -25,6 +25,9 @@
 | `OPENROUTER_IMAGE_QUALITY` | `openrouter_image_quality` | `low` | нет | Качество изображения. |
 | `OPENROUTER_IMAGE_FORMAT` | `openrouter_image_format` | пусто | нет | Опциональный формат изображения, если поддерживается выбранной image-моделью. |
 | `OPENROUTER_BASE_URL` | `openrouter_base_url` | `https://openrouter.ai/api/v1` | нет | Base URL OpenRouter API. |
+| `OPENROUTER_ENABLE_WEB_SEARCH` | `openrouter_enable_web_search` | `true` | нет | Включает OpenRouter `openrouter:web_search` server tool для поиска свежих новостей. |
+| `OPENROUTER_WEB_SEARCH_ENGINE` | `openrouter_web_search_engine` | `auto` | нет | Engine web-search server tool; `auto` выбирает native search или fallback. |
+| `OPENROUTER_WEB_SEARCH_MAX_RESULTS` | `openrouter_web_search_max_results` | `5` | нет | Максимум результатов web-search для grounding новостей. |
 | `TELEGRAM_BOT_TOKEN` | `telegram_bot_token` | пусто | да | Токен Telegram-бота. |
 | `TELEGRAM_CHANNEL_ID` | `telegram_channel_id` | пусто | да | ID или username Telegram-канала. |
 | `NEWS_TOPIC` | `news_topic` | `technology` | нет | Тема поиска новостей. |

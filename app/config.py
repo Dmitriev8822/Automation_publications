@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     openrouter_image_quality: str | None = Field(default="low", alias="OPENROUTER_IMAGE_QUALITY")
     openrouter_image_size: str | None = Field(default=None, alias="OPENROUTER_IMAGE_SIZE")
     openrouter_image_format: str | None = Field(default=None, alias="OPENROUTER_IMAGE_FORMAT")
+    openrouter_enable_web_search: bool = Field(default=True, alias="OPENROUTER_ENABLE_WEB_SEARCH")
+    openrouter_web_search_engine: str | None = Field(default="auto", alias="OPENROUTER_WEB_SEARCH_ENGINE")
+    openrouter_web_search_max_results: int = Field(default=5, alias="OPENROUTER_WEB_SEARCH_MAX_RESULTS", ge=1)
     openrouter_base_url: AnyUrl = Field(
         default="https://openrouter.ai/api/v1", alias="OPENROUTER_BASE_URL"
     )
