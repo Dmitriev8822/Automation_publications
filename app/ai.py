@@ -366,14 +366,15 @@ class AIClient:
                 "OPENROUTER_API_KEY is required for OpenRouter requests"
             )
 
+        model = self._chat_model_name()
         logger.info(
             "Sending OpenRouter chat completion request: endpoint=%s model=%s schema=%s",
             self.settings.chat_completions_url,
-            self.settings.openrouter_model,
+            model,
             schema_name,
         )
         request_payload = {
-            "model": self.settings.openrouter_model,
+            "model": model,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -397,7 +398,7 @@ class AIClient:
         except OpenRouterRequestError:
             logger.warning(
                 "Retrying OpenRouter request with json_object response format: model=%s schema=%s",
-                self.settings.openrouter_model,
+                model,
                 schema_name,
             )
             fallback_payload = dict(request_payload)
@@ -432,11 +433,63 @@ class AIClient:
             logger.warning(
                 "OpenRouter request failed: endpoint=%s model=%s schema=%s error=%s",
                 self.settings.chat_completions_url,
-                self.settings.openrouter_model,
+                request_payload.get("model", self.settings.openrouter_model),
                 schema_name,
                 exc,
             )
-            raise OpenRouterRequestError("OpenRouter request failed") from exc
+            raise OpenRouterRequestError(self._format_request_error(exc)) from exc
+
+    def _chat_model_name(self) -> str:
+        """Return the model name used for Chat Completions requests.
+
+        OpenRouter web search is configured through the dedicated ``tools`` field in
+        this client. Some user configs still append the legacy/provider suffix
+        ``:online`` to the model name, which can be rejected with HTTP 403 for
+        ordinary chat-completion requests such as content-plan generation.
+        Stripping the suffix keeps generation on the selected base model while
+        ``find_fresh_news()`` still gets web access through ``openrouter:web_search``.
+        """
+
+        model = self.settings.openrouter_model.strip()
+        if model.endswith(":online"):
+            normalized = model.removesuffix(":online")
+            logger.warning(
+                "OPENROUTER_MODEL=%s uses ':online'; using base chat model %s. "
+                "Web search is controlled by OPENROUTER_ENABLE_WEB_SEARCH.",
+                model,
+                normalized,
+            )
+            return normalized
+        return model
+
+    @staticmethod
+    def _format_request_error(exc: Exception) -> str:
+        response = getattr(exc, "response", None)
+        status_code = getattr(response, "status_code", None)
+        reason = getattr(response, "reason_phrase", None)
+        if status_code is None:
+            return f"OpenRouter request failed: {exc}"
+
+        detail = ""
+        if response is not None:
+            try:
+                body = response.json()
+            except Exception:  # noqa: BLE001 - best-effort diagnostic only
+                body = getattr(response, "text", "")
+            if isinstance(body, dict):
+                error = body.get("error")
+                if isinstance(error, dict):
+                    detail = str(error.get("message") or error.get("code") or "")
+                else:
+                    detail = str(body.get("message") or body)
+            elif body:
+                detail = str(body)
+        message = f"OpenRouter request failed with HTTP {status_code}"
+        if reason:
+            message += f" {reason}"
+        if detail:
+            message += f": {detail[:500]}"
+        return message
 
     def _web_search_tool(self) -> dict[str, Any]:
         parameters: dict[str, Any] = {
