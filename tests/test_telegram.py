@@ -286,6 +286,7 @@ from app.telegram import (
     CONTENT_PLAN_BUTTON_TEXT,
     REMINDERS_BUTTON_TEXT,
     APPROVE_REMINDER_BUTTON_TEXT,
+    REJECT_REMINDER_BUTTON_TEXT,
 )
 from app.schemas import ContentPlan, ContentPlanItem
 from datetime import datetime, timezone
@@ -400,3 +401,25 @@ def test_content_plan_dialog_reports_generation_error_without_reraising() -> Non
 
     assert "Не удалось сформировать контент план" in bot.sent_messages[-1]["text"]
     assert "OpenRouter request failed" in bot.sent_messages[-1]["text"]
+
+
+def test_publication_approval_handler_matches_persisted_string_chat_id() -> None:
+    bot = FakeBot()
+    publisher = TelegramPublisher(settings=make_settings(), bot=bot)
+    rejected: list[int] = []
+
+    publisher.register_publication_approval_handler(
+        lambda item_id: None,
+        rejected.append,
+        lambda item_id: make_plan().items[0],
+        lambda item_id: make_plan().items[0],
+    )
+    approval_handler = bot.handlers[0]["func"]
+
+    publisher.send_publication_reminder("777", 42, make_plan().items[0])
+    approval_handler(
+        SimpleNamespace(chat=SimpleNamespace(id=777), text=REJECT_REMINDER_BUTTON_TEXT)
+    )
+
+    assert rejected == [42]
+    assert bot.sent_messages[-1]["text"] == "❌ Публикация отменена."
