@@ -19,8 +19,15 @@ class FakeMessage:
 
 
 class FakeBot:
-    def __init__(self, *, fail: bool = False, polling_error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        fail: bool = False,
+        photo_error: Exception | None = None,
+        polling_error: Exception | None = None,
+    ) -> None:
         self.fail = fail
+        self.photo_error = photo_error
         self.polling_error = polling_error
         self.sent_messages: list[dict] = []
         self.sent_photos: list[dict] = []
@@ -34,6 +41,8 @@ class FakeBot:
         return FakeMessage(message_id=101)
 
     def send_photo(self, chat_id: str, photo, **kwargs):
+        if self.photo_error is not None:
+            raise self.photo_error
         if self.fail:
             raise RuntimeError("telegram is unavailable")
         self.sent_photos.append({"chat_id": chat_id, "photo": photo, **kwargs})
@@ -114,6 +123,26 @@ def test_publish_post_with_image_url() -> None:
 
     assert message_id == 202
     assert bot.sent_photos[0]["photo"] == "https://example.com/image.png"
+
+
+
+def test_publish_post_falls_back_to_text_when_telegram_cannot_process_image() -> None:
+    image_error = ApiTelegramException(
+        "sendPhoto",
+        object(),
+        {"ok": False, "error_code": 400, "description": "Bad Request: IMAGE_PROCESS_FAILED"},
+    )
+    bot = FakeBot(photo_error=image_error)
+    publisher = TelegramPublisher(settings=make_settings(), bot=bot)
+    image = ImageAsset(data=b"invalid-image-bytes", mime_type="image/jpeg")
+
+    message_id = publisher.publish_post(make_post(), image)
+
+    assert message_id == 101
+    assert bot.sent_photos == []
+    assert bot.sent_messages == [
+        {"chat_id": "@test_channel", "text": "Telegram-ready post text"}
+    ]
 
 
 def test_publish_post_propagates_telegram_error_with_clear_message() -> None:

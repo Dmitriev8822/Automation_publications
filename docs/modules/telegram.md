@@ -42,10 +42,10 @@
 ## Как работает публикация
 
 - Если `image` не передан, `publish_post()` вызывает `send_message(chat_id=..., text=post.text)`.
-- Если `image` передан, `publish_post()` вызывает `send_photo(chat_id=..., photo=..., caption=post.text)`.
+- Если `image` передан, `publish_post()` вызывает `send_photo(chat_id=..., photo=..., caption=post.text)`. Если Telegram возвращает `Bad Request: IMAGE_PROCESS_FAILED`, модуль логирует предупреждение и повторяет публикацию как текстовый пост через `send_message`, чтобы не срывать весь бизнес-процесс из-за непригодного изображения.
 - Для `ImageAsset` поддерживаются `data`, `file_path` и `url`.
 - Метод возвращает `message.message_id` из ответа Telegram.
-- Ошибки Telegram API при публикации оборачиваются в `RuntimeError` с префиксом `Telegram publication failed`. Ошибка `401 Unauthorized` при запуске polling оборачивается в понятное сообщение с подсказкой проверить `TELEGRAM_BOT_TOKEN`.
+- Ошибки Telegram API при публикации оборачиваются в `RuntimeError` с префиксом `Telegram publication failed`, кроме `IMAGE_PROCESS_FAILED` для изображения: в этом случае выполняется text-only fallback. Ошибка `401 Unauthorized` при запуске polling оборачивается в понятное сообщение с подсказкой проверить `TELEGRAM_BOT_TOKEN`.
 
 ## Проверка токена и channel id
 
@@ -68,7 +68,7 @@ Callback передается из `app.main` и вызывает `app.service.c
 
 ## Тестирование без реального Telegram
 
-Unit-тесты должны передавать fake/mock bot в `TelegramPublisher(settings=..., bot=...)`. Такой бот реализует методы `send_message()`, `send_photo()`, `message_handler()` и `infinity_polling()` и возвращает объект с `message_id`. Это позволяет проверить публикацию текста, изображений, возврат ID, регистрацию кнопки, отправку progress-сообщений и проброс ошибок без реальных HTTP-запросов.
+Unit-тесты должны передавать fake/mock bot в `TelegramPublisher(settings=..., bot=...)`. Такой бот реализует методы `send_message()`, `send_photo()`, `message_handler()` и `infinity_polling()` и возвращает объект с `message_id`. Это позволяет проверить публикацию текста, изображений, text-only fallback при `IMAGE_PROCESS_FAILED`, возврат ID, регистрацию кнопки, отправку progress-сообщений и проброс ошибок без реальных HTTP-запросов.
 
 Запуск тестов модуля:
 

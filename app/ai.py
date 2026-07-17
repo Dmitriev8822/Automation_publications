@@ -41,14 +41,18 @@ class NewsListResponse(BaseModel):
     news: list[News] = Field(default_factory=list)
 
 
-class ImageResponse(BaseModel):
-    """Structured response expected for image generation."""
+class OpenRouterImageItem(BaseModel):
+    """Single item returned by OpenRouter's dedicated Image API."""
 
-    data: str | None = None
-    base64_data: str | None = None
+    b64_json: str | None = None
     url: str | None = None
-    file_path: str | None = None
-    mime_type: str = "image/png"
+    media_type: str | None = None
+
+
+class OpenRouterImageResponse(BaseModel):
+    """Buffered response from OpenRouter's dedicated Image API."""
+
+    data: list[OpenRouterImageItem] = Field(default_factory=list)
 
 
 class AIClient:
@@ -123,29 +127,77 @@ class AIClient:
         return post
 
     def generate_image(self, post: GeneratedPost) -> ImageAsset | None:
-        """Generate an image asset, or None when image generation is disabled."""
+        """Generate an image asset through OpenRouter's dedicated Image API."""
 
         if not self.settings.enable_image_generation:
             logger.info("Image generation is disabled by ENABLE_IMAGE_GENERATION=false")
             return None
 
-        logger.info("Requesting image generation from OpenRouter: source_url=%s", post.source_url)
-        payload = self._chat_json(
-            system_prompt=self._image_system_prompt(),
-            user_prompt=self._image_user_prompt(post),
-            schema=ImageResponse.model_json_schema(),
-            schema_name="image_asset",
+        logger.info(
+            "Requesting image generation from OpenRouter Image API: endpoint=%s model=%s source_url=%s",
+            self.settings.image_generation_url,
+            self.settings.openrouter_image_model,
+            post.source_url,
         )
+        payload = self._post_image_generation(post)
         try:
-            image = ImageResponse.model_validate(payload)
-            return ImageAsset(
-                data=self._decode_image_data(image.data or image.base64_data),
-                url=image.url,
-                file_path=image.file_path,
-                mime_type=image.mime_type,
-            )
+            image_response = OpenRouterImageResponse.model_validate(payload)
         except ValidationError as exc:
-            raise OpenRouterResponseError("OpenRouter returned an invalid image payload") from exc
+            raise OpenRouterResponseError("OpenRouter returned an invalid image generation payload") from exc
+
+        if not image_response.data:
+            logger.warning("OpenRouter Image API returned no image data for source_url=%s", post.source_url)
+            return None
+
+        item = image_response.data[0]
+        image_data = self._decode_image_data(item.b64_json)
+        if image_data is None and item.url is None:
+            logger.warning("OpenRouter Image API returned an empty image item for source_url=%s", post.source_url)
+            return None
+
+        return ImageAsset(
+            data=image_data,
+            url=item.url,
+            mime_type=item.media_type or self._mime_type_from_format(self.settings.openrouter_image_format),
+        )
+
+    def _post_image_generation(self, post: GeneratedPost) -> dict[str, Any]:
+        if not self.settings.openrouter_api_key:
+            raise OpenRouterRequestError("OPENROUTER_API_KEY is required for OpenRouter image requests")
+
+        request_payload = {
+            "model": self.settings.openrouter_image_model,
+            "prompt": self._image_prompt(post),
+            "n": 1,
+        }
+        if self.settings.openrouter_image_quality:
+            request_payload["quality"] = self.settings.openrouter_image_quality
+        if self.settings.openrouter_image_size:
+            request_payload["size"] = self.settings.openrouter_image_size
+        if self.settings.openrouter_image_format:
+            request_payload["output_format"] = self.settings.openrouter_image_format
+        headers = {
+            "Authorization": f"Bearer {self.settings.openrouter_api_key}",
+            "Content-Type": "application/json",
+        }
+        try:
+            response = self.http_client.post(self.settings.image_generation_url, json=request_payload, headers=headers)
+            if hasattr(response, "raise_for_status"):
+                response.raise_for_status()
+            data = response.json() if hasattr(response, "json") else response
+        except Exception as exc:  # noqa: BLE001 - normalize third-party/client errors for callers
+            logger.warning(
+                "OpenRouter image generation request failed: endpoint=%s model=%s error=%s",
+                self.settings.image_generation_url,
+                self.settings.openrouter_image_model,
+                exc,
+            )
+            raise OpenRouterRequestError("OpenRouter image generation request failed") from exc
+
+        if not isinstance(data, dict):
+            raise OpenRouterResponseError("OpenRouter image generation response must be a JSON object")
+        logger.info("OpenRouter image generation completed successfully")
+        return data
 
     def _chat_json(self, system_prompt: str, user_prompt: str, schema: dict[str, Any], schema_name: str) -> dict[str, Any]:
         response = self._post_chat_completion(system_prompt, user_prompt, schema, schema_name)
@@ -252,6 +304,8 @@ class AIClient:
         except (binascii.Error, ValueError) as exc:
             raise OpenRouterResponseError("OpenRouter image data must be base64-encoded bytes") from exc
 
+
+
     def _news_system_prompt(self) -> str:
         return "Return only JSON. You are a news editor selecting fresh, reliable and publication-ready news."
 
@@ -275,18 +329,23 @@ class AIClient:
             "Return JSON with title, text, image_prompt, source_url."
         )
 
-    def _image_system_prompt(self) -> str:
+    @staticmethod
+    def _image_prompt(post: GeneratedPost) -> str:
         return (
-            "Return only JSON. Create a real image asset for a Telegram publication. "
-            "Do not return a text-only prompt as the image."
+            "Safe editorial illustration for a Telegram technology news post. "
+            f"Title: {post.title}. Text summary: {post.text}. Visual direction: {post.image_prompt}. "
+            "No logos, no copyrighted characters, no readable UI text, no fake screenshots."
         )
 
     @staticmethod
-    def _image_user_prompt(post: GeneratedPost) -> str:
-        return (
-            f"Generate a safe editorial image asset for this post. Title: {post.title}. "
-            f"Text: {post.text}. Preferred prompt: {post.image_prompt}. "
-            "Return an object with either base64_data containing base64-encoded image bytes, "
-            "a direct HTTPS image url, or file_path, plus mime_type. "
-            "Do not return only a rewritten prompt."
-        )
+    def _mime_type_from_format(value: str | None) -> str:
+        if value is None:
+            return "image/png"
+        normalized = value.strip().lower().lstrip(".")
+        if normalized in {"jpg", "jpeg"}:
+            return "image/jpeg"
+        if normalized == "webp":
+            return "image/webp"
+        if normalized == "svg":
+            return "image/svg+xml"
+        return "image/png"

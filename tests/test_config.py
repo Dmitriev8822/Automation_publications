@@ -13,7 +13,12 @@ def test_default_values():
     assert settings.publish_interval_minutes == 30
     assert settings.openrouter_api_key is None
     assert settings.openrouter_model == "openai/gpt-4.1-mini"
+    assert settings.openrouter_image_model == "openai/gpt-image-1-mini"
+    assert settings.openrouter_image_quality == "low"
+    assert settings.openrouter_image_size is None
+    assert settings.openrouter_image_format is None
     assert str(settings.openrouter_base_url).rstrip("/") == "https://openrouter.ai/api/v1"
+    assert settings.image_generation_url == "https://openrouter.ai/api/v1/images"
     assert settings.telegram_bot_token is None
     assert settings.telegram_channel_id is None
     assert settings.news_topic == "technology"
@@ -34,6 +39,10 @@ def test_environment_variable_override(monkeypatch):
     monkeypatch.setenv("PUBLISH_INTERVAL_MINUTES", "10")
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
     monkeypatch.setenv("OPENROUTER_MODEL", "test/model")
+    monkeypatch.setenv("OPENROUTER_IMAGE_MODEL", "test/image-model")
+    monkeypatch.setenv("OPENROUTER_IMAGE_QUALITY", "medium")
+    monkeypatch.setenv("OPENROUTER_IMAGE_SIZE", "1024x1024")
+    monkeypatch.setenv("OPENROUTER_IMAGE_FORMAT", "jpeg")
     monkeypatch.setenv("OPENROUTER_BASE_URL", "https://example.com/api")
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-telegram-token")
     monkeypatch.setenv("TELEGRAM_CHANNEL_ID", "@test_channel")
@@ -55,7 +64,12 @@ def test_environment_variable_override(monkeypatch):
     assert settings.publish_interval_minutes == 10
     assert settings.openrouter_api_key == "test-openrouter-key"
     assert settings.openrouter_model == "test/model"
+    assert settings.openrouter_image_model == "test/image-model"
+    assert settings.openrouter_image_quality == "medium"
+    assert settings.openrouter_image_size == "1024x1024"
+    assert settings.openrouter_image_format == "jpeg"
     assert str(settings.openrouter_base_url).rstrip("/") == "https://example.com/api"
+    assert settings.image_generation_url == "https://example.com/api/images"
     assert settings.telegram_bot_token == "test-telegram-token"
     assert settings.telegram_channel_id == "@test_channel"
     assert settings.news_topic == "science"

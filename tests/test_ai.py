@@ -34,6 +34,8 @@ class FakeHTTPClient:
     def post(self, url: str, **kwargs):
         self.requests.append({"url": url, **kwargs})
         content = self.contents.pop(0)
+        if isinstance(content, dict) and "data" in content:
+            return FakeResponse(content)
         return FakeResponse({"choices": [{"message": {"content": content}}]})
 
 
@@ -139,12 +141,14 @@ def test_generate_image_returns_none_when_disabled() -> None:
 
 
 def test_generate_image_parses_url_asset() -> None:
-    content = json.dumps(
-        {
-            "url": "https://example.com/image.png",
-            "mime_type": "image/png",
-        }
-    )
+    content = {
+        "data": [
+            {
+                "url": "https://example.com/image.png",
+                "media_type": "image/png",
+            }
+        ]
+    }
     http_client = FakeHTTPClient([content])
     client = AIClient(settings=make_settings(enable_image_generation=True), http_client=http_client)
     post = GeneratedPost(
@@ -160,16 +164,22 @@ def test_generate_image_parses_url_asset() -> None:
     assert str(image.url) == "https://example.com/image.png"
     assert image.mime_type == "image/png"
     assert len(http_client.requests) == 1
+    assert http_client.requests[0]["url"].endswith("/images")
+    assert http_client.requests[0]["json"]["model"] == "openai/gpt-image-1-mini"
+    assert http_client.requests[0]["json"]["quality"] == "low"
+    assert "size" not in http_client.requests[0]["json"]
 
 
 def test_generate_image_decodes_base64_asset() -> None:
     encoded = base64.b64encode(b"image-bytes").decode("ascii")
-    content = json.dumps(
-        {
-            "base64_data": encoded,
-            "mime_type": "image/png",
-        }
-    )
+    content = {
+        "data": [
+            {
+                "b64_json": encoded,
+                "media_type": "image/png",
+            }
+        ]
+    }
     http_client = FakeHTTPClient([content])
     client = AIClient(settings=make_settings(enable_image_generation=True), http_client=http_client)
     post = GeneratedPost(
@@ -186,14 +196,29 @@ def test_generate_image_decodes_base64_asset() -> None:
     assert image.mime_type == "image/png"
 
 
+def test_generate_image_returns_none_on_empty_image_api_item() -> None:
+    content = {"data": [{}]}
+    client = AIClient(settings=make_settings(enable_image_generation=True), http_client=FakeHTTPClient([content]))
+    post = GeneratedPost(
+        title="AI release",
+        text="Fresh Telegram-ready post",
+        image_prompt="Editorial illustration",
+        source_url="https://example.com/ai-release",
+    )
+
+    assert client.generate_image(post) is None
+
+
 def test_generate_image_decodes_data_url_asset() -> None:
     encoded = base64.b64encode(b"png-bytes").decode("ascii")
-    content = json.dumps(
-        {
-            "data": f"data:image/png;base64,{encoded}",
-            "mime_type": "image/png",
-        }
-    )
+    content = {
+        "data": [
+            {
+                "b64_json": f"data:image/png;base64,{encoded}",
+                "media_type": "image/png",
+            }
+        ]
+    }
     client = AIClient(settings=make_settings(enable_image_generation=True), http_client=FakeHTTPClient([content]))
     post = GeneratedPost(
         title="AI release",

@@ -19,7 +19,11 @@
 | `DATABASE_URL` | `database_url` | `sqlite:///./data/publications.db` | нет | URL подключения к БД. |
 | `PUBLISH_INTERVAL_MINUTES` | `publish_interval_minutes` | `30` | нет | Интервал публикаций в минутах. |
 | `OPENROUTER_API_KEY` | `openrouter_api_key` | пусто | да | API-ключ OpenRouter. |
-| `OPENROUTER_MODEL` | `openrouter_model` | `openai/gpt-4.1-mini` | нет | Модель OpenRouter. |
+| `OPENROUTER_MODEL` | `openrouter_model` | `openai/gpt-4.1-mini` | нет | Модель OpenRouter для поиска новостей и текста. |
+| `OPENROUTER_IMAGE_MODEL` | `openrouter_image_model` | `openai/gpt-image-1-mini` | нет | Модель OpenRouter Images API для реальных изображений. |
+| `OPENROUTER_IMAGE_SIZE` | `openrouter_image_size` | пусто | нет | Опциональный размер изображения, если поддерживается выбранной image-моделью. |
+| `OPENROUTER_IMAGE_QUALITY` | `openrouter_image_quality` | `low` | нет | Качество изображения. |
+| `OPENROUTER_IMAGE_FORMAT` | `openrouter_image_format` | пусто | нет | Опциональный формат изображения, если поддерживается выбранной image-моделью. |
 | `OPENROUTER_BASE_URL` | `openrouter_base_url` | `https://openrouter.ai/api/v1` | нет | Base URL OpenRouter API. |
 | `TELEGRAM_BOT_TOKEN` | `telegram_bot_token` | пусто | да | Токен Telegram-бота. |
 | `TELEGRAM_CHANNEL_ID` | `telegram_channel_id` | пусто | да | ID или username Telegram-канала. |
@@ -78,6 +82,11 @@ DATABASE_URL=sqlite:///./data/publications.db
 PUBLISH_INTERVAL_MINUTES=30
 OPENROUTER_API_KEY=
 OPENROUTER_MODEL=openai/gpt-4.1-mini
+OPENROUTER_IMAGE_MODEL=openai/gpt-image-1-mini
+OPENROUTER_IMAGE_QUALITY=low
+# Optional: set only if the selected image model supports these parameters.
+# OPENROUTER_IMAGE_SIZE=1024x1024
+# OPENROUTER_IMAGE_FORMAT=jpeg
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 TELEGRAM_BOT_TOKEN=123456789:replace_with_real_secret
 TELEGRAM_CHANNEL_ID=@your_channel

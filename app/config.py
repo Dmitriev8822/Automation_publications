@@ -16,6 +16,10 @@ class Settings(BaseSettings):
 
     openrouter_api_key: str | None = Field(default=None, alias="OPENROUTER_API_KEY")
     openrouter_model: str = Field(default="openai/gpt-4.1-mini", alias="OPENROUTER_MODEL")
+    openrouter_image_model: str = Field(default="openai/gpt-image-1-mini", alias="OPENROUTER_IMAGE_MODEL")
+    openrouter_image_quality: str | None = Field(default="low", alias="OPENROUTER_IMAGE_QUALITY")
+    openrouter_image_size: str | None = Field(default=None, alias="OPENROUTER_IMAGE_SIZE")
+    openrouter_image_format: str | None = Field(default=None, alias="OPENROUTER_IMAGE_FORMAT")
     openrouter_base_url: AnyUrl = Field(
         default="https://openrouter.ai/api/v1", alias="OPENROUTER_BASE_URL"
     )
@@ -44,6 +48,11 @@ class Settings(BaseSettings):
     def chat_completions_url(self) -> str:
         """OpenRouter chat completions endpoint derived from the base URL."""
         return f"{str(self.openrouter_base_url).rstrip('/')}/chat/completions"
+
+    @property
+    def image_generation_url(self) -> str:
+        """OpenRouter dedicated image generation endpoint derived from the base URL."""
+        return f"{str(self.openrouter_base_url).rstrip('/')}/images"
 
     @field_validator("app_env")
     @classmethod

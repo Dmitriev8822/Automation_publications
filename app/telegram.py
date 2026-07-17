@@ -69,13 +69,22 @@ class TelegramPublisher:
             if image is None:
                 message = self.bot.send_message(chat_id=self.channel_id, text=post.text)
             else:
-                photo_context = self._photo_payload(image)
-                with photo_context as photo:
-                    message = self.bot.send_photo(
-                        chat_id=self.channel_id,
-                        photo=photo,
-                        caption=post.text,
+                try:
+                    photo_context = self._photo_payload(image)
+                    with photo_context as photo:
+                        message = self.bot.send_photo(
+                            chat_id=self.channel_id,
+                            photo=photo,
+                            caption=post.text,
+                        )
+                except Exception as exc:
+                    if not self._is_image_process_failed(exc):
+                        raise
+                    logger.warning(
+                        "Telegram rejected generated image for source_url=%s; publishing text-only fallback",
+                        post.source_url,
                     )
+                    message = self.bot.send_message(chat_id=self.channel_id, text=post.text)
         except Exception as exc:
             raise RuntimeError(f"Telegram publication failed: {exc}") from exc
 
@@ -168,6 +177,13 @@ class TelegramPublisher:
     @staticmethod
     def _is_unauthorized_error(exc: ApiTelegramException) -> bool:
         return getattr(exc, "error_code", None) == TELEGRAM_UNAUTHORIZED_CODE
+
+    @staticmethod
+    def _is_image_process_failed(exc: Exception) -> bool:
+        if not isinstance(exc, ApiTelegramException):
+            return False
+        description = str(getattr(exc, "description", "")) or str(exc)
+        return getattr(exc, "error_code", None) == 400 and "IMAGE_PROCESS_FAILED" in description
 
     @staticmethod
     def _photo_payload(image: ImageAsset):
