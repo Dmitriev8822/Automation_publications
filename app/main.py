@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from datetime import datetime, timedelta, timezone
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -93,9 +94,24 @@ def build_runtime(settings: Settings) -> ApplicationRuntime:
     ai_client = AIClient(settings)
     telegram_publisher = TelegramPublisher(settings)
 
+    last_scheduled_news_run: datetime | None = None
+
     def scheduled_job():
-        create_and_publish_post(ai_client, telegram_publisher, repository)
+        nonlocal last_scheduled_news_run
         publish_due_content_plan_items(telegram_publisher, content_plan_repository)
+        if not settings.enable_scheduled_news:
+            return
+
+        now = datetime.now(timezone.utc)
+        news_interval = timedelta(minutes=settings.publish_interval_minutes)
+        if last_scheduled_news_run is not None and now - last_scheduled_news_run < news_interval:
+            return
+
+        last_scheduled_news_run = now
+        try:
+            create_and_publish_post(ai_client, telegram_publisher, repository)
+        except Exception:
+            logger.exception("Scheduled news publication failed")
     manual_job = lambda progress: create_and_publish_post(
         ai_client,
         telegram_publisher,
@@ -105,8 +121,8 @@ def build_runtime(settings: Settings) -> ApplicationRuntime:
     telegram_publisher.register_manual_publish_handler(manual_job)
     telegram_publisher.register_content_plan_handler(ai_client.generate_content_plan, content_plan_repository.save_plan)
 
-    logger.info("Creating scheduler with interval_minutes=%s", settings.publish_interval_minutes)
-    scheduler = create_scheduler(scheduled_job, settings.publish_interval_minutes)
+    logger.info("Creating content-plan scheduler with interval_minutes=%s", settings.content_plan_poll_interval_minutes)
+    scheduler = create_scheduler(scheduled_job, settings.content_plan_poll_interval_minutes)
     return ApplicationRuntime(scheduler=scheduler, telegram_publisher=telegram_publisher)
 
 
@@ -162,7 +178,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     runtime.scheduler.start()
-    logger.info("Scheduler started with %s minute interval", settings.publish_interval_minutes)
+    logger.info("Scheduler started with %s minute content-plan poll interval", settings.content_plan_poll_interval_minutes)
     logger.info("Telegram bot manual publication controls started")
 
     try:

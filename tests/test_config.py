@@ -11,6 +11,8 @@ def test_default_values():
     assert settings.log_level == "INFO"
     assert settings.database_url == "sqlite:///./data/publications.db"
     assert settings.publish_interval_minutes == 30
+    assert settings.content_plan_poll_interval_minutes == 1
+    assert settings.enable_scheduled_news is False
     assert settings.openrouter_api_key is None
     assert settings.openrouter_model == "openai/gpt-4.1-mini"
     assert settings.openrouter_image_model == "openai/gpt-image-1-mini"
@@ -37,6 +39,8 @@ def test_environment_variable_override(monkeypatch):
     monkeypatch.setenv("LOG_LEVEL", "debug")
     monkeypatch.setenv("DATABASE_URL", "sqlite:///:memory:")
     monkeypatch.setenv("PUBLISH_INTERVAL_MINUTES", "10")
+    monkeypatch.setenv("CONTENT_PLAN_POLL_INTERVAL_MINUTES", "2")
+    monkeypatch.setenv("ENABLE_SCHEDULED_NEWS", "true")
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
     monkeypatch.setenv("OPENROUTER_MODEL", "test/model")
     monkeypatch.setenv("OPENROUTER_IMAGE_MODEL", "test/image-model")
@@ -62,6 +66,8 @@ def test_environment_variable_override(monkeypatch):
     assert settings.log_level == "DEBUG"
     assert settings.database_url == "sqlite:///:memory:"
     assert settings.publish_interval_minutes == 10
+    assert settings.content_plan_poll_interval_minutes == 2
+    assert settings.enable_scheduled_news is True
     assert settings.openrouter_api_key == "test-openrouter-key"
     assert settings.openrouter_model == "test/model"
     assert settings.openrouter_image_model == "test/image-model"

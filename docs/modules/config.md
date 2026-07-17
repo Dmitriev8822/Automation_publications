@@ -17,7 +17,9 @@
 | `APP_ENV` | `app_env` | `dev` | нет | Режим запуска: `dev`, `test`, `prod`. |
 | `LOG_LEVEL` | `log_level` | `INFO` | нет | Уровень логирования. |
 | `DATABASE_URL` | `database_url` | `sqlite:///./data/publications.db` | нет | URL подключения к БД. |
-| `PUBLISH_INTERVAL_MINUTES` | `publish_interval_minutes` | `30` | нет | Интервал публикаций в минутах. |
+| `PUBLISH_INTERVAL_MINUTES` | `publish_interval_minutes` | `30` | нет | Интервал регулярной публикации свежих новостей, используется только когда `ENABLE_SCHEDULED_NEWS=true`. |
+| `CONTENT_PLAN_POLL_INTERVAL_MINUTES` | `content_plan_poll_interval_minutes` | `1` | нет | Интервал проверки due-пунктов контент-плана; по умолчанию 1 минута, чтобы посты выходили в согласованное время. |
+| `ENABLE_SCHEDULED_NEWS` | `enable_scheduled_news` | `false` | нет | Включает регулярную публикацию свежих новостей внутри scheduler; по умолчанию выключено, приоритет у контент-плана. |
 | `OPENROUTER_API_KEY` | `openrouter_api_key` | пусто | да | API-ключ OpenRouter. |
 | `OPENROUTER_MODEL` | `openrouter_model` | `openai/gpt-4.1-mini` | нет | Модель OpenRouter для поиска новостей и текста. |
 | `OPENROUTER_IMAGE_MODEL` | `openrouter_image_model` | `openai/gpt-image-1-mini` | нет | Модель OpenRouter Images API для реальных изображений. |
@@ -82,6 +84,8 @@ pytest tests/test_config.py
 APP_ENV=dev
 LOG_LEVEL=INFO
 DATABASE_URL=sqlite:///./data/publications.db
+CONTENT_PLAN_POLL_INTERVAL_MINUTES=1
+ENABLE_SCHEDULED_NEWS=false
 PUBLISH_INTERVAL_MINUTES=30
 OPENROUTER_API_KEY=
 OPENROUTER_MODEL=openai/gpt-4.1-mini

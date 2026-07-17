@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     database_url: str = Field(default="sqlite:///./data/publications.db", alias="DATABASE_URL")
     publish_interval_minutes: int = Field(default=30, alias="PUBLISH_INTERVAL_MINUTES", ge=1)
+    content_plan_poll_interval_minutes: int = Field(
+        default=1, alias="CONTENT_PLAN_POLL_INTERVAL_MINUTES", ge=1
+    )
+    enable_scheduled_news: bool = Field(default=False, alias="ENABLE_SCHEDULED_NEWS")
 
     openrouter_api_key: str | None = Field(default=None, alias="OPENROUTER_API_KEY")
     openrouter_model: str = Field(default="openai/gpt-4.1-mini", alias="OPENROUTER_MODEL")
