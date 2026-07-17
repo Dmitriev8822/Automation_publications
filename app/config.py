@@ -1,6 +1,7 @@
 """Centralized application configuration loaded from environment variables."""
 
 from functools import lru_cache
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import AnyUrl, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -13,6 +14,7 @@ class Settings(BaseSettings):
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     database_url: str = Field(default="sqlite:///./data/publications.db", alias="DATABASE_URL")
     publish_interval_minutes: int = Field(default=30, alias="PUBLISH_INTERVAL_MINUTES", ge=1)
+    app_timezone: str = Field(default="Europe/Moscow", alias="APP_TIMEZONE")
 
     openrouter_api_key: str | None = Field(default=None, alias="OPENROUTER_API_KEY")
     openrouter_model: str = Field(default="openai/gpt-4.1-mini", alias="OPENROUTER_MODEL")
@@ -20,6 +22,9 @@ class Settings(BaseSettings):
     openrouter_image_quality: str | None = Field(default="low", alias="OPENROUTER_IMAGE_QUALITY")
     openrouter_image_size: str | None = Field(default=None, alias="OPENROUTER_IMAGE_SIZE")
     openrouter_image_format: str | None = Field(default=None, alias="OPENROUTER_IMAGE_FORMAT")
+    openrouter_enable_web_search: bool = Field(default=True, alias="OPENROUTER_ENABLE_WEB_SEARCH")
+    openrouter_web_search_engine: str | None = Field(default="auto", alias="OPENROUTER_WEB_SEARCH_ENGINE")
+    openrouter_web_search_max_results: int = Field(default=5, alias="OPENROUTER_WEB_SEARCH_MAX_RESULTS", ge=1)
     openrouter_base_url: AnyUrl = Field(
         default="https://openrouter.ai/api/v1", alias="OPENROUTER_BASE_URL"
     )
@@ -54,12 +59,27 @@ class Settings(BaseSettings):
         """OpenRouter dedicated image generation endpoint derived from the base URL."""
         return f"{str(self.openrouter_base_url).rstrip('/')}/images"
 
+    @property
+    def timezone(self) -> ZoneInfo:
+        """Application timezone used for user-facing scheduled times."""
+        return ZoneInfo(self.app_timezone)
+
     @field_validator("app_env")
     @classmethod
     def normalize_app_env(cls, value: str) -> str:
         normalized = value.lower().strip()
         if normalized not in {"dev", "test", "prod"}:
             raise ValueError("APP_ENV must be one of: dev, test, prod")
+        return normalized
+
+    @field_validator("app_timezone")
+    @classmethod
+    def validate_app_timezone(cls, value: str) -> str:
+        normalized = value.strip()
+        try:
+            ZoneInfo(normalized)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError("APP_TIMEZONE must be a valid IANA timezone, for example Europe/Moscow") from exc
         return normalized
 
     @field_validator("log_level")

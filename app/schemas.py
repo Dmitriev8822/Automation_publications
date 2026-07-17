@@ -15,6 +15,51 @@ class PostStatus(str, Enum):
     FAILED = "failed"
 
 
+
+
+class ContentPlanItemStatus(str, Enum):
+    """Lifecycle statuses for scheduled content-plan items."""
+
+    SCHEDULED = "scheduled"
+    PUBLISHED = "published"
+    FAILED = "failed"
+
+
+class ContentPlanItem(BaseModel):
+    """One publication slot in an agreed content plan."""
+
+    scheduled_at: datetime
+    title: str
+    text: str = Field(..., min_length=1)
+    image_prompt: str = ""
+    source_url: AnyUrl | None = None
+    status: ContentPlanItemStatus = ContentPlanItemStatus.SCHEDULED
+    telegram_message_id: int | None = None
+    error_message: str | None = None
+
+    @field_validator("text")
+    @classmethod
+    def text_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("ContentPlanItem text must not be empty")
+        return value
+
+
+class ContentPlan(BaseModel):
+    """Structured content plan generated from user's free-form request."""
+
+    title: str
+    period_start: datetime
+    period_end: datetime
+    items: list[ContentPlanItem] = Field(..., min_length=1)
+    raw_request: str | None = None
+
+    @model_validator(mode="after")
+    def validate_period(self) -> "ContentPlan":
+        if self.period_end < self.period_start:
+            raise ValueError("ContentPlan period_end must be greater than or equal to period_start")
+        return self
+
 class News(BaseModel):
     """News item selected as a source for a Telegram publication."""
 

@@ -6,7 +6,7 @@ import logging
 from collections.abc import Callable
 from typing import Protocol
 
-from app.schemas import GeneratedPost, ImageAsset, News, PublishedPost
+from app.schemas import ContentPlanItem, GeneratedPost, ImageAsset, News, PublishedPost
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +40,14 @@ class PostRepositoryProtocol(Protocol):
 
     def mark_failed(self, source_url: str, error_message: str) -> PublishedPost: ...
 
+
+
+class ContentPlanRepositoryProtocol(Protocol):
+    def get_due_items(self) -> list[tuple[int, ContentPlanItem]]: ...
+
+    def mark_item_published(self, item_id: int, telegram_message_id: int) -> ContentPlanItem: ...
+
+    def mark_item_failed(self, item_id: int, error_message: str) -> ContentPlanItem: ...
 
 def create_and_publish_post(
     ai_client: AIClientProtocol,
@@ -133,3 +141,28 @@ def _notify(progress_callback: ProgressCallback | None, message: str) -> None:
         progress_callback(message)
     except Exception:
         logger.exception("Could not send publication progress message")
+
+
+def publish_due_content_plan_items(
+    telegram_publisher: TelegramPublisherProtocol,
+    content_plan_repository: ContentPlanRepositoryProtocol,
+) -> list[ContentPlanItem]:
+    """Publish all approved content-plan items whose scheduled time has come."""
+
+    published_items: list[ContentPlanItem] = []
+    due_items = content_plan_repository.get_due_items()
+    logger.info("Found %d due content-plan item(s)", len(due_items))
+    for item_id, item in due_items:
+        generated_post = GeneratedPost(
+            title=item.title,
+            text=item.text,
+            image_prompt=item.image_prompt,
+            source_url=item.source_url or f"https://content-plan.local/items/{item_id}",
+        )
+        try:
+            message_id = telegram_publisher.publish_post(generated_post, None)
+            published_items.append(content_plan_repository.mark_item_published(item_id, message_id))
+        except Exception as exc:  # noqa: BLE001 - keep scheduler alive and persist item failure
+            logger.exception("Content-plan item publication failed: item_id=%s", item_id)
+            content_plan_repository.mark_item_failed(item_id, str(exc) or exc.__class__.__name__)
+    return published_items

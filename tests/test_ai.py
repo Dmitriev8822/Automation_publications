@@ -90,6 +90,53 @@ def test_find_fresh_news_parses_successful_response() -> None:
     assert news[0].title == "AI release"
 
 
+def test_find_fresh_news_uses_openrouter_web_search_tool() -> None:
+    content = json.dumps({"news": []})
+    http_client = FakeHTTPClient([content])
+    client = AIClient(
+        settings=make_settings(
+            openrouter_enable_web_search=True,
+            openrouter_web_search_engine="native",
+            openrouter_web_search_max_results=3,
+        ),
+        http_client=http_client,
+    )
+
+    assert client.find_fresh_news() == []
+
+    payload = http_client.requests[0]["json"]
+    assert payload["tools"] == [
+        {
+            "type": "openrouter:web_search",
+            "parameters": {"max_results": 3, "engine": "native"},
+        }
+    ]
+    assert "using web search" in payload["messages"][1]["content"]
+
+
+def test_generate_post_does_not_use_web_search_tool() -> None:
+    content = json.dumps(
+        {
+            "title": "AI release",
+            "text": "Fresh Telegram-ready post",
+            "image_prompt": "Editorial illustration of AI automation",
+            "source_url": "https://example.com/ai-release",
+        }
+    )
+    http_client = FakeHTTPClient([content])
+    client = AIClient(settings=make_settings(openrouter_enable_web_search=True), http_client=http_client)
+    news = News(
+        title="AI release",
+        source_url="https://example.com/ai-release",
+        source_name="Example",
+        summary="A new AI system was released.",
+    )
+
+    client.generate_post(news)
+
+    assert "tools" not in http_client.requests[0]["json"]
+
+
 def test_generate_post_parses_generated_post() -> None:
     content = json.dumps(
         {
@@ -268,3 +315,34 @@ def test_find_fresh_news_retries_with_json_object_when_json_schema_request_fails
     assert len(http_client.requests) == 2
     assert http_client.requests[0]["json"]["response_format"]["type"] == "json_schema"
     assert http_client.requests[1]["json"]["response_format"]["type"] == "json_object"
+
+
+def test_generate_content_plan_parses_structured_plan() -> None:
+    content = json.dumps(
+        {
+            "plan": {
+                "title": "План на неделю",
+                "period_start": "2026-07-20T09:00:00",
+                "period_end": "2026-07-26T18:00:00",
+                "items": [
+                    {
+                        "scheduled_at": "2026-07-20T10:00:00",
+                        "title": "Первый пост",
+                        "text": "Текст первого поста",
+                        "image_prompt": "Иллюстрация",
+                    }
+                ],
+            }
+        }
+    )
+    client = AIClient(settings=make_settings(), http_client=FakeHTTPClient([content]))
+
+    plan = client.generate_content_plan("нужен план на неделю")
+
+    assert plan.title == "План на неделю"
+    assert plan.raw_request == "нужен план на неделю"
+    assert plan.items[0].title == "Первый пост"
+    assert plan.items[0].scheduled_at.tzinfo is not None
+    assert plan.items[0].scheduled_at.isoformat() == "2026-07-20T10:00:00+03:00"
+    assert client.http_client.requests[0]["json"]["response_format"]["json_schema"]["name"] == "content_plan"
+    assert "Europe/Moscow" in client.http_client.requests[0]["json"]["messages"][1]["content"]

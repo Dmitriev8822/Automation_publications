@@ -2,7 +2,7 @@
 
 ## Цель проекта
 
-Сервис автоматически находит свежие новости по заданной теме, выбирает ещё не опубликованную новость, генерирует Telegram-пост и изображение, публикует результат в канал и сохраняет факт публикации в SQLite.
+Сервис автоматически находит свежие новости по заданной теме, выбирает ещё не опубликованную новость, генерирует Telegram-пост и изображение, публикует результат в канал и сохраняет факт публикации в SQLite. Также бот умеет принимать от пользователя свободное описание контент-плана на период, превращать его через AI в структурированный план, давать пользователю перегенерировать или согласовать результат, сохранять согласованный план в БД и публиковать его пункты по расписанию.
 
 ## Общий процесс
 
@@ -12,7 +12,7 @@ app/main.py
 быстрые тесты без внешних API
   ↓
 app/scheduler.py
-  ↓ каждые PUBLISH_INTERVAL_MINUTES минут
+  ↓ точные date-jobs по scheduled_at пунктов контент-плана
 app/service.py
   ↓
 app/ai.py → поиск новости, генерация текста, генерация изображения
@@ -20,19 +20,19 @@ app/database.py → проверка дублей и сохранение рез
 app/telegram.py → публикация в Telegram
 ```
 
-Дополнительно `app/main.py` регистрирует в Telegram-боте кнопку ручной публикации. При нажатии кнопки бот вызывает тот же бизнес-сценарий `app/service.py`, что и scheduler, и отправляет пользователю короткие статусные сообщения о ходе поиска новости, генерации и публикации.
+Дополнительно `app/main.py` регистрирует в Telegram-боте кнопку ручной публикации и кнопку `Контент план`. Ручная публикация вызывает тот же бизнес-сценарий `app/service.py`, что и scheduler. Диалог контент-плана принимает свободное описание, вызывает `AIClient.generate_content_plan()`, показывает структурированный результат с кнопками перегенерации и согласования, а после согласования сохраняет план через `ContentPlanRepository`. Планировщик регистрирует отдельные `date`-jobs для пунктов согласованных планов и в согласованное время вызывает `publish_due_content_plan_items()`. Пользовательские времена без явного timezone трактуются через `APP_TIMEZONE` и сохраняются для планирования в этом timezone. Периодическая новостная публикация раз в `PUBLISH_INTERVAL_MINUTES` оставлена как legacy-заготовка, но не используется в актуальном runtime.
 
 ## Модули
 
 | Модуль | Файл | Ответственность |
 | --- | --- | --- |
 | config | `app/config.py` | Загрузка и валидация настроек из `.env` |
-| schemas | `app/schemas.py` | Общие Pydantic-сущности и enum-статусы |
-| database | `app/database.py` | SQLite, SQLAlchemy, репозиторий публикаций |
-| ai | `app/ai.py` | OpenRouter: поиск новостей, генерация текста и изображения |
+| schemas | `app/schemas.py` | Общие Pydantic-сущности и enum-статусы для постов и контент-планов |
+| database | `app/database.py` | SQLite, SQLAlchemy, репозитории публикаций и контент-планов |
+| ai | `app/ai.py` | OpenRouter: поиск новостей, генерация текста, изображения и структурированного контент-плана |
 | telegram | `app/telegram.py` | pyTelegramBotAPI: отправка текста/изображений в канал и кнопка ручной публикации |
-| service | `app/service.py` | Главный сценарий создания и публикации поста |
-| scheduler | `app/scheduler.py` | Периодический запуск сценария через APScheduler |
+| service | `app/service.py` | Главные сценарии создания новостного поста и выполнения согласованного контент-плана |
+| scheduler | `app/scheduler.py` | Точные APScheduler date-jobs для пунктов контент-плана; legacy interval-заготовка для новостей |
 | main | `app/main.py` | Точка входа: тесты, инициализация БД, запуск планировщика |
 | tests | `tests/` | Быстрые тесты без реальных OpenRouter и Telegram API |
 | docs | `docs/` | Описание архитектуры, задач и документация модулей |
@@ -94,6 +94,42 @@ class PostStatus(str, Enum):
     GENERATED = "generated"
     PUBLISHED = "published"
     FAILED = "failed"
+```
+
+
+
+### `ContentPlanItemStatus`
+
+```python
+class ContentPlanItemStatus(str, Enum):
+    SCHEDULED = "scheduled"
+    PUBLISHED = "published"
+    FAILED = "failed"
+```
+
+### `ContentPlanItem`
+
+```python
+class ContentPlanItem(BaseModel):
+    scheduled_at: datetime
+    title: str
+    text: str
+    image_prompt: str = ""
+    source_url: AnyUrl | None = None
+    status: ContentPlanItemStatus = ContentPlanItemStatus.SCHEDULED
+    telegram_message_id: int | None = None
+    error_message: str | None = None
+```
+
+### `ContentPlan`
+
+```python
+class ContentPlan(BaseModel):
+    title: str
+    period_start: datetime
+    period_end: datetime
+    items: list[ContentPlanItem]
+    raw_request: str | None = None
 ```
 
 ## Ключевые правила интеграции

@@ -123,3 +123,11 @@ published = PublishedPost(
     status=PostStatus.GENERATED,
 )
 ```
+
+## Контент-планы
+
+Дополнительно модуль содержит схемы для согласованных контент-планов:
+
+- `ContentPlanItemStatus` со статусами `scheduled`, `published`, `failed`.
+- `ContentPlanItem` — один будущий пост с обязательными `scheduled_at`, `title`, непустым `text`, `image_prompt`, необязательным `source_url`, статусом, `telegram_message_id` и `error_message`.
+- `ContentPlan` — структурированный план с `title`, `period_start`, `period_end`, списком `items` и исходным `raw_request`. Валидатор запрещает период, у которого `period_end` раньше `period_start`.

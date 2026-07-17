@@ -125,3 +125,73 @@ def test_ensure_sqlite_parent_dir_creates_missing_directory(tmp_path):
     _ensure_sqlite_parent_dir(f"sqlite:///{db_path}")
 
     assert db_path.parent.is_dir()
+
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+from app.database import ContentPlanRepository
+from app.schemas import ContentPlan, ContentPlanItemStatus
+
+
+def make_content_plan() -> ContentPlan:
+    now = datetime.now(timezone.utc)
+    return ContentPlan(
+        title="План на неделю",
+        period_start=now - timedelta(days=1),
+        period_end=now + timedelta(days=1),
+        raw_request="план",
+        items=[
+            {"scheduled_at": now - timedelta(minutes=1), "title": "Due", "text": "Due text", "image_prompt": ""},
+            {"scheduled_at": now + timedelta(hours=1), "title": "Future", "text": "Future text", "image_prompt": ""},
+        ],
+    )
+
+
+def test_content_plan_repository_saves_and_returns_due_items(repository):
+    _, engine = repository
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False, future=True)
+    repo = ContentPlanRepository(SessionLocal)
+
+    plan_id = repo.save_plan(make_content_plan())
+    due_items = repo.get_due_items()
+
+    assert plan_id is not None
+    assert len(due_items) == 1
+    item_id, item = due_items[0]
+    assert item.title == "Due"
+
+    published = repo.mark_item_published(item_id, 321)
+    assert published.status is ContentPlanItemStatus.PUBLISHED
+    assert published.telegram_message_id == 321
+    assert repo.get_due_items() == []
+
+
+def test_content_plan_repository_returns_scheduled_item_slots(repository):
+    _, engine = repository
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False, future=True)
+    repo = ContentPlanRepository(SessionLocal)
+
+    repo.save_plan(make_content_plan())
+    slots = repo.get_scheduled_item_slots()
+
+    assert len(slots) == 2
+    assert all(isinstance(item_id, int) for item_id, _scheduled_at in slots)
+    assert slots[0][1] <= slots[1][1]
+
+
+def test_content_plan_repository_treats_naive_times_as_app_timezone(repository):
+    _, engine = repository
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False, future=True)
+    repo = ContentPlanRepository(SessionLocal, app_timezone=ZoneInfo("Europe/Moscow"))
+    plan = ContentPlan(
+        title="План",
+        period_start=datetime(2026, 7, 17, 13, 0),
+        period_end=datetime(2026, 7, 17, 14, 0),
+        items=[{"scheduled_at": datetime(2026, 7, 17, 13, 35), "title": "Local", "text": "Text"}],
+    )
+
+    repo.save_plan(plan)
+    slots = repo.get_scheduled_item_slots()
+
+    assert slots[0][1].isoformat() == "2026-07-17T13:35:00+03:00"
+    assert repo.get_due_items(datetime(2026, 7, 17, 13, 34, tzinfo=ZoneInfo("Europe/Moscow"))) == []
+    assert len(repo.get_due_items(datetime(2026, 7, 17, 13, 35, tzinfo=ZoneInfo("Europe/Moscow")))) == 1

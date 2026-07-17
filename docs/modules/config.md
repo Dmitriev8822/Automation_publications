@@ -17,7 +17,8 @@
 | `APP_ENV` | `app_env` | `dev` | нет | Режим запуска: `dev`, `test`, `prod`. |
 | `LOG_LEVEL` | `log_level` | `INFO` | нет | Уровень логирования. |
 | `DATABASE_URL` | `database_url` | `sqlite:///./data/publications.db` | нет | URL подключения к БД. |
-| `PUBLISH_INTERVAL_MINUTES` | `publish_interval_minutes` | `30` | нет | Интервал публикаций в минутах. |
+| `PUBLISH_INTERVAL_MINUTES` | `publish_interval_minutes` | `30` | нет | Legacy-интервал публикаций в минутах. |
+| `APP_TIMEZONE` | `app_timezone` | `Europe/Moscow` | нет | IANA timezone для пользовательских времен контент-плана. |
 | `OPENROUTER_API_KEY` | `openrouter_api_key` | пусто | да | API-ключ OpenRouter. |
 | `OPENROUTER_MODEL` | `openrouter_model` | `openai/gpt-4.1-mini` | нет | Модель OpenRouter для поиска новостей и текста. |
 | `OPENROUTER_IMAGE_MODEL` | `openrouter_image_model` | `openai/gpt-image-1-mini` | нет | Модель OpenRouter Images API для реальных изображений. |
@@ -25,6 +26,9 @@
 | `OPENROUTER_IMAGE_QUALITY` | `openrouter_image_quality` | `low` | нет | Качество изображения. |
 | `OPENROUTER_IMAGE_FORMAT` | `openrouter_image_format` | пусто | нет | Опциональный формат изображения, если поддерживается выбранной image-моделью. |
 | `OPENROUTER_BASE_URL` | `openrouter_base_url` | `https://openrouter.ai/api/v1` | нет | Base URL OpenRouter API. |
+| `OPENROUTER_ENABLE_WEB_SEARCH` | `openrouter_enable_web_search` | `true` | нет | Включает OpenRouter `openrouter:web_search` server tool для поиска свежих новостей. |
+| `OPENROUTER_WEB_SEARCH_ENGINE` | `openrouter_web_search_engine` | `auto` | нет | Engine web-search server tool; `auto` выбирает native search или fallback. |
+| `OPENROUTER_WEB_SEARCH_MAX_RESULTS` | `openrouter_web_search_max_results` | `5` | нет | Максимум результатов web-search для grounding новостей. |
 | `TELEGRAM_BOT_TOKEN` | `telegram_bot_token` | пусто | да | Токен Telegram-бота. |
 | `TELEGRAM_CHANNEL_ID` | `telegram_channel_id` | пусто | да | ID или username Telegram-канала. |
 | `NEWS_TOPIC` | `news_topic` | `technology` | нет | Тема поиска новостей. |
@@ -80,6 +84,7 @@ APP_ENV=dev
 LOG_LEVEL=INFO
 DATABASE_URL=sqlite:///./data/publications.db
 PUBLISH_INTERVAL_MINUTES=30
+APP_TIMEZONE=Europe/Moscow
 OPENROUTER_API_KEY=
 OPENROUTER_MODEL=openai/gpt-4.1-mini
 OPENROUTER_IMAGE_MODEL=openai/gpt-image-1-mini

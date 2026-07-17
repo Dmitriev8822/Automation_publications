@@ -6,13 +6,14 @@ import base64
 import binascii
 import json
 import logging
+from datetime import datetime
 from collections.abc import Mapping
 from typing import Any, Protocol
 
 from pydantic import BaseModel, Field, ValidationError
 
 from app.config import Settings, get_settings
-from app.schemas import GeneratedPost, ImageAsset, News
+from app.schemas import ContentPlan, GeneratedPost, ImageAsset, News
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,12 @@ class NewsListResponse(BaseModel):
     """Structured response expected for fresh-news lookup."""
 
     news: list[News] = Field(default_factory=list)
+
+
+class ContentPlanResponse(BaseModel):
+    """Structured response expected for content-plan generation."""
+
+    plan: ContentPlan
 
 
 class OpenRouterImageItem(BaseModel):
@@ -92,6 +99,7 @@ class AIClient:
                 user_prompt=self._news_user_prompt(),
                 schema=NewsListResponse.model_json_schema(),
                 schema_name="fresh_news",
+                use_web_search=self.settings.openrouter_enable_web_search,
             )
             response = NewsListResponse.model_validate(payload)
         except (AIClientError, ValidationError, TypeError, ValueError) as exc:
@@ -125,6 +133,25 @@ class AIClient:
         if len(post.text) > self.settings.post_max_length:
             post = post.model_copy(update={"text": post.text[: self.settings.post_max_length].rstrip()})
         return post
+
+    def generate_content_plan(self, description: str) -> ContentPlan:
+        """Turn a free-form user request into a structured content plan."""
+
+        if not description.strip():
+            raise ValueError("Content plan description must not be empty")
+        logger.info("Requesting content plan generation from OpenRouter")
+        payload = self._chat_json(
+            system_prompt=self._content_plan_system_prompt(),
+            user_prompt=self._content_plan_user_prompt(description),
+            schema=ContentPlanResponse.model_json_schema(),
+            schema_name="content_plan",
+        )
+        try:
+            response = ContentPlanResponse.model_validate(payload)
+        except ValidationError as exc:
+            raise OpenRouterResponseError("OpenRouter returned an invalid content plan payload") from exc
+        plan = self._normalize_content_plan_datetimes(response.plan)
+        return plan.model_copy(update={"raw_request": description})
 
     def generate_image(self, post: GeneratedPost) -> ImageAsset | None:
         """Generate an image asset through OpenRouter's dedicated Image API."""
@@ -199,8 +226,15 @@ class AIClient:
         logger.info("OpenRouter image generation completed successfully")
         return data
 
-    def _chat_json(self, system_prompt: str, user_prompt: str, schema: dict[str, Any], schema_name: str) -> dict[str, Any]:
-        response = self._post_chat_completion(system_prompt, user_prompt, schema, schema_name)
+    def _chat_json(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        schema: dict[str, Any],
+        schema_name: str,
+        use_web_search: bool = False,
+    ) -> dict[str, Any]:
+        response = self._post_chat_completion(system_prompt, user_prompt, schema, schema_name, use_web_search)
         content = self._extract_message_content(response)
         if isinstance(content, Mapping):
             return dict(content)
@@ -214,7 +248,14 @@ class AIClient:
             raise OpenRouterResponseError("OpenRouter JSON response must be an object")
         return parsed
 
-    def _post_chat_completion(self, system_prompt: str, user_prompt: str, schema: dict[str, Any], schema_name: str) -> dict[str, Any]:
+    def _post_chat_completion(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        schema: dict[str, Any],
+        schema_name: str,
+        use_web_search: bool = False,
+    ) -> dict[str, Any]:
         if not self.settings.openrouter_api_key:
             raise OpenRouterRequestError("OPENROUTER_API_KEY is required for OpenRouter requests")
 
@@ -235,6 +276,8 @@ class AIClient:
                 "json_schema": {"name": schema_name, "strict": True, "schema": schema},
             },
         }
+        if use_web_search:
+            request_payload["tools"] = [self._web_search_tool()]
         headers = {
             "Authorization": f"Bearer {self.settings.openrouter_api_key}",
             "Content-Type": "application/json",
@@ -278,6 +321,12 @@ class AIClient:
             )
             raise OpenRouterRequestError("OpenRouter request failed") from exc
 
+    def _web_search_tool(self) -> dict[str, Any]:
+        parameters: dict[str, Any] = {"max_results": self.settings.openrouter_web_search_max_results}
+        if self.settings.openrouter_web_search_engine:
+            parameters["engine"] = self.settings.openrouter_web_search_engine
+        return {"type": "openrouter:web_search", "parameters": parameters}
+
     @staticmethod
     def _extract_message_content(response: dict[str, Any]) -> Any:
         choices = response.get("choices")
@@ -309,10 +358,47 @@ class AIClient:
 
     def _news_user_prompt(self) -> str:
         return (
-            f"Find up to {self.settings.max_news_items} fresh news items about '{self.settings.news_topic}'. "
+            f"Find up to {self.settings.max_news_items} fresh news items about '{self.settings.news_topic}' using web search. "
             f"Language for news summaries: {self.settings.news_language}. Prioritize relevance and recency. "
+            "Use only web-search-backed sources with real public URLs; do not invent sources, dates or links. "
             "Return JSON object with key 'news'. Each item must include title, source_url, source_name, summary, "
             "and optional ISO-8601 published_at."
+        )
+
+    def _content_plan_system_prompt(self) -> str:
+        return "Return only JSON. You are a Telegram channel editor planning scheduled posts."
+
+    def _content_plan_user_prompt(self, description: str) -> str:
+        now = datetime.now(self.settings.timezone)
+        return (
+            f"Convert this free-form content plan request into a structured plan in {self.settings.post_language}. "
+            f"Current application time is {now.isoformat()} in timezone {self.settings.app_timezone}. "
+            f"Interpret user times without an explicit timezone as {self.settings.app_timezone}. "
+            "Choose explicit ISO-8601 scheduled_at timestamps with UTC offset for every item, keep posts Telegram-ready, "
+            "and return JSON object with key 'plan'. Plan fields: title, period_start, period_end, items. "
+            "Each item fields: scheduled_at, title, text, image_prompt, optional source_url. "
+            f"User request: {description}"
+        )
+
+
+    def _normalize_content_plan_datetimes(self, plan: ContentPlan) -> ContentPlan:
+        """Normalize AI-produced naive datetimes to the configured app timezone."""
+
+        timezone_info = self.settings.timezone
+
+        def normalize(value: datetime) -> datetime:
+            if value.tzinfo is None:
+                return value.replace(tzinfo=timezone_info)
+            return value.astimezone(timezone_info)
+
+        return plan.model_copy(
+            update={
+                "period_start": normalize(plan.period_start),
+                "period_end": normalize(plan.period_end),
+                "items": [
+                    item.model_copy(update={"scheduled_at": normalize(item.scheduled_at)}) for item in plan.items
+                ],
+            }
         )
 
     def _post_system_prompt(self) -> str:
