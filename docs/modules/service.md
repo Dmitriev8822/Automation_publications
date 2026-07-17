@@ -108,3 +108,16 @@ Unit-тесты должны передавать fake-объекты вмест
 3. Опубликовать пост через `telegram_publisher.publish_post(post, None)`.
 4. При успехе вызвать `mark_item_published(item_id, message_id)`.
 5. При ошибке вызвать `mark_item_failed(item_id, error_message)` и продолжить обработку следующих пунктов, чтобы scheduler не остановился.
+
+## Предпубликационное согласование пунктов контент-плана
+
+`publish_due_content_plan_items(telegram_publisher, content_plan_repository, ai_client=None)` теперь может получать `ai_client`: если он передан, перед публикацией пункта контент-плана генерируется картинка по `image_prompt`, и в Telegram уходит пост вместе с изображением.
+
+Для сценария напоминаний добавлены функции:
+
+- `approve_content_plan_item_publication(item_id, telegram_publisher, content_plan_repository, ai_client=None)` — публикует конкретный пункт сразу после одобрения пользователя и помечает его `published`;
+- `reject_content_plan_item_publication(item_id, content_plan_repository, reason=None)` — отменяет пункт после отказа пользователя;
+- `regenerate_content_plan_item_text(item_id, ai_client, content_plan_repository, instruction="")` — просит AI обновить текст и сохраняет результат;
+- `regenerate_content_plan_item_image(item_id, ai_client, content_plan_repository, instruction="")` — просит AI обновить prompt картинки и сохраняет результат.
+
+Так `service.py` остается единственным местом бизнес-процесса публикации и управляет связкой AI → изображение → Telegram → статус в БД.
