@@ -12,7 +12,7 @@ from typing import Any, Protocol
 from pydantic import BaseModel, Field, ValidationError
 
 from app.config import Settings, get_settings
-from app.schemas import GeneratedPost, ImageAsset, News
+from app.schemas import ContentPlan, GeneratedPost, ImageAsset, News
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +39,12 @@ class NewsListResponse(BaseModel):
     """Structured response expected for fresh-news lookup."""
 
     news: list[News] = Field(default_factory=list)
+
+
+class ContentPlanResponse(BaseModel):
+    """Structured response expected for content-plan generation."""
+
+    plan: ContentPlan
 
 
 class OpenRouterImageItem(BaseModel):
@@ -125,6 +131,24 @@ class AIClient:
         if len(post.text) > self.settings.post_max_length:
             post = post.model_copy(update={"text": post.text[: self.settings.post_max_length].rstrip()})
         return post
+
+    def generate_content_plan(self, description: str) -> ContentPlan:
+        """Turn a free-form user request into a structured content plan."""
+
+        if not description.strip():
+            raise ValueError("Content plan description must not be empty")
+        logger.info("Requesting content plan generation from OpenRouter")
+        payload = self._chat_json(
+            system_prompt=self._content_plan_system_prompt(),
+            user_prompt=self._content_plan_user_prompt(description),
+            schema=ContentPlanResponse.model_json_schema(),
+            schema_name="content_plan",
+        )
+        try:
+            response = ContentPlanResponse.model_validate(payload)
+        except ValidationError as exc:
+            raise OpenRouterResponseError("OpenRouter returned an invalid content plan payload") from exc
+        return response.plan.model_copy(update={"raw_request": description})
 
     def generate_image(self, post: GeneratedPost) -> ImageAsset | None:
         """Generate an image asset through OpenRouter's dedicated Image API."""
@@ -313,6 +337,18 @@ class AIClient:
             f"Language for news summaries: {self.settings.news_language}. Prioritize relevance and recency. "
             "Return JSON object with key 'news'. Each item must include title, source_url, source_name, summary, "
             "and optional ISO-8601 published_at."
+        )
+
+    def _content_plan_system_prompt(self) -> str:
+        return "Return only JSON. You are a Telegram channel editor planning scheduled posts."
+
+    def _content_plan_user_prompt(self, description: str) -> str:
+        return (
+            f"Convert this free-form content plan request into a structured plan in {self.settings.post_language}. "
+            "Choose explicit ISO-8601 scheduled_at timestamps for every item, keep posts Telegram-ready, "
+            "and return JSON object with key 'plan'. Plan fields: title, period_start, period_end, items. "
+            "Each item fields: scheduled_at, title, text, image_prompt, optional source_url. "
+            f"User request: {description}"
         )
 
     def _post_system_prompt(self) -> str:

@@ -228,3 +228,37 @@ def test_reports_ai_fetch_error_when_news_list_is_empty() -> None:
         "⚠️ OpenRouter не вернул новости из-за ошибки: OpenRouter request failed",
         "ℹ️ Свежих неопубликованных новостей не найдено.",
     ]
+
+from app.service import publish_due_content_plan_items
+from app.schemas import ContentPlanItem, ContentPlanItemStatus
+from datetime import datetime, timezone
+
+
+class FakeContentPlanRepository:
+    def __init__(self) -> None:
+        self.items = [(5, ContentPlanItem(scheduled_at=datetime.now(timezone.utc), title="Plan post", text="Text", image_prompt=""))]
+        self.published: list[tuple[int, int]] = []
+        self.failed: list[tuple[int, str]] = []
+
+    def get_due_items(self):
+        return self.items
+
+    def mark_item_published(self, item_id: int, telegram_message_id: int) -> ContentPlanItem:
+        self.published.append((item_id, telegram_message_id))
+        return self.items[0][1].model_copy(update={"status": ContentPlanItemStatus.PUBLISHED, "telegram_message_id": telegram_message_id})
+
+    def mark_item_failed(self, item_id: int, error_message: str) -> ContentPlanItem:
+        self.failed.append((item_id, error_message))
+        return self.items[0][1].model_copy(update={"status": ContentPlanItemStatus.FAILED, "error_message": error_message})
+
+
+def test_publish_due_content_plan_items_publishes_due_items() -> None:
+    repo = FakeContentPlanRepository()
+    publisher = FakeTelegramPublisher()
+
+    result = publish_due_content_plan_items(publisher, repo)
+
+    assert len(result) == 1
+    assert result[0].status is ContentPlanItemStatus.PUBLISHED
+    assert repo.published == [(5, 777)]
+    assert publisher.published[0][0].title == "Plan post"

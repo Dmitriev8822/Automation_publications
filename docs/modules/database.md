@@ -94,3 +94,16 @@ if not repository.is_published(str(post.source_url)):
 ## Консольное логирование
 
 Модуль пишет INFO-логи при инициализации БД, создании директории SQLite, проверке дублей, сохранении `generated`, переводе в `published`, переводе в `failed` и загрузке записи по `source_url`. Эти сообщения помогают понять, дошёл ли бизнес-сценарий до БД и какой `source_url` проверяется или обновляется.
+
+## Хранение контент-планов
+
+Для согласованных контент-планов добавлены таблицы `content_plans` и `content_plan_items`.
+
+`ContentPlanRepository` предоставляет методы:
+
+- `save_plan(plan: ContentPlan) -> int` — сохраняет согласованный план и возвращает id.
+- `get_due_items(now: datetime | None = None) -> list[tuple[int, ContentPlanItem]]` — возвращает пункты со статусом `scheduled`, время которых уже наступило.
+- `mark_item_published(item_id: int, telegram_message_id: int) -> ContentPlanItem` — фиксирует успешную публикацию пункта.
+- `mark_item_failed(item_id: int, error_message: str) -> ContentPlanItem` — фиксирует ошибку публикации пункта.
+
+Пункты плана имеют статусы `scheduled`, `published`, `failed`. `init_db()` создает таблицы контент-планов вместе с таблицей публикаций.

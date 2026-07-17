@@ -16,9 +16,9 @@ import pytest
 
 from app.ai import AIClient
 from app.config import Settings, get_settings, validate_runtime_settings
-from app.database import PostRepository, init_db
+from app.database import ContentPlanRepository, PostRepository, init_db
 from app.scheduler import create_scheduler
-from app.service import create_and_publish_post
+from app.service import create_and_publish_post, publish_due_content_plan_items
 from app.telegram import TelegramPublisher
 
 logger = logging.getLogger(__name__)
@@ -89,10 +89,13 @@ def build_runtime(settings: Settings) -> ApplicationRuntime:
 
     logger.info("Creating PostRepository, AIClient and TelegramPublisher")
     repository = PostRepository()
+    content_plan_repository = ContentPlanRepository()
     ai_client = AIClient(settings)
     telegram_publisher = TelegramPublisher(settings)
 
-    scheduled_job = lambda: create_and_publish_post(ai_client, telegram_publisher, repository)
+    def scheduled_job():
+        create_and_publish_post(ai_client, telegram_publisher, repository)
+        publish_due_content_plan_items(telegram_publisher, content_plan_repository)
     manual_job = lambda progress: create_and_publish_post(
         ai_client,
         telegram_publisher,
@@ -100,6 +103,7 @@ def build_runtime(settings: Settings) -> ApplicationRuntime:
         progress_callback=progress,
     )
     telegram_publisher.register_manual_publish_handler(manual_job)
+    telegram_publisher.register_content_plan_handler(ai_client.generate_content_plan, content_plan_repository.save_plan)
 
     logger.info("Creating scheduler with interval_minutes=%s", settings.publish_interval_minutes)
     scheduler = create_scheduler(scheduled_job, settings.publish_interval_minutes)

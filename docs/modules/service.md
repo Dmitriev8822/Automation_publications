@@ -96,3 +96,15 @@ Unit-тесты должны передавать fake-объекты вмест
 ## Пример использования
 
 См. описание выше в этом документе.
+
+## Выполнение контент-плана
+
+`publish_due_content_plan_items(telegram_publisher, content_plan_repository) -> list[ContentPlanItem]` публикует все пункты согласованных контент-планов, у которых наступил `scheduled_at` и статус остается `scheduled`.
+
+Алгоритм:
+
+1. Получить due-пункты через `content_plan_repository.get_due_items()`.
+2. Для каждого пункта собрать `GeneratedPost` из сохраненного текста.
+3. Опубликовать пост через `telegram_publisher.publish_post(post, None)`.
+4. При успехе вызвать `mark_item_published(item_id, message_id)`.
+5. При ошибке вызвать `mark_item_failed(item_id, error_message)` и продолжить обработку следующих пунктов, чтобы scheduler не остановился.
