@@ -17,7 +17,8 @@
 | `APP_ENV` | `app_env` | `dev` | нет | Режим запуска: `dev`, `test`, `prod`. |
 | `LOG_LEVEL` | `log_level` | `INFO` | нет | Уровень логирования. |
 | `DATABASE_URL` | `database_url` | `sqlite:///./data/publications.db` | нет | URL подключения к БД. |
-| `PUBLISH_INTERVAL_MINUTES` | `publish_interval_minutes` | `30` | нет | Интервал публикаций в минутах. |
+| `PUBLISH_INTERVAL_MINUTES` | `publish_interval_minutes` | `30` | нет | Legacy-интервал публикаций в минутах. |
+| `APP_TIMEZONE` | `app_timezone` | `Europe/Moscow` | нет | IANA timezone для пользовательских времен контент-плана. |
 | `OPENROUTER_API_KEY` | `openrouter_api_key` | пусто | да | API-ключ OpenRouter. |
 | `OPENROUTER_MODEL` | `openrouter_model` | `openai/gpt-4.1-mini` | нет | Модель OpenRouter для поиска новостей и текста. |
 | `OPENROUTER_IMAGE_MODEL` | `openrouter_image_model` | `openai/gpt-image-1-mini` | нет | Модель OpenRouter Images API для реальных изображений. |
@@ -83,6 +84,7 @@ APP_ENV=dev
 LOG_LEVEL=INFO
 DATABASE_URL=sqlite:///./data/publications.db
 PUBLISH_INTERVAL_MINUTES=30
+APP_TIMEZONE=Europe/Moscow
 OPENROUTER_API_KEY=
 OPENROUTER_MODEL=openai/gpt-4.1-mini
 OPENROUTER_IMAGE_MODEL=openai/gpt-image-1-mini

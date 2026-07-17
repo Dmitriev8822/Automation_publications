@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Callable
 
@@ -19,6 +20,22 @@ logger = logging.getLogger(__name__)
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _to_app_timezone_naive(value: datetime, app_timezone: ZoneInfo) -> datetime:
+    """Convert a datetime to naive application-local time for SQLite storage."""
+
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=app_timezone)
+    return value.astimezone(app_timezone).replace(tzinfo=None)
+
+
+def _from_app_timezone_naive(value: datetime, app_timezone: ZoneInfo) -> datetime:
+    """Treat datetimes loaded from SQLite as application-local time."""
+
+    if value.tzinfo is None:
+        return value.replace(tzinfo=app_timezone)
+    return value.astimezone(app_timezone)
 
 
 class Base(DeclarativeBase):
@@ -194,8 +211,13 @@ class PostRepository:
 class ContentPlanRepository:
     """Repository for approved content plans and their scheduled items."""
 
-    def __init__(self, session_factory: Callable[[], Session] = SessionLocal) -> None:
+    def __init__(
+        self,
+        session_factory: Callable[[], Session] = SessionLocal,
+        app_timezone: ZoneInfo | None = None,
+    ) -> None:
         self._session_factory = session_factory
+        self._app_timezone = app_timezone or get_settings().timezone
 
     def save_plan(self, plan: ContentPlan) -> int:
         """Persist an approved content plan and return its database id."""
@@ -204,11 +226,11 @@ class ContentPlanRepository:
             record = ContentPlanRecord(
                 title=plan.title,
                 raw_request=plan.raw_request,
-                period_start=plan.period_start,
-                period_end=plan.period_end,
+                period_start=_to_app_timezone_naive(plan.period_start, self._app_timezone),
+                period_end=_to_app_timezone_naive(plan.period_end, self._app_timezone),
                 items=[
                     ContentPlanItemRecord(
-                        scheduled_at=item.scheduled_at,
+                        scheduled_at=_to_app_timezone_naive(item.scheduled_at, self._app_timezone),
                         title=item.title,
                         text=item.text,
                         image_prompt=item.image_prompt,
@@ -226,7 +248,7 @@ class ContentPlanRepository:
     def get_due_items(self, now: datetime | None = None) -> list[tuple[int, ContentPlanItem]]:
         """Return scheduled content-plan items due for publication."""
 
-        due_at = now or _utc_now()
+        due_at = _to_app_timezone_naive(now or _utc_now(), self._app_timezone)
         with self._session_factory() as session:
             records = session.scalars(
                 select(ContentPlanItemRecord)
@@ -245,7 +267,7 @@ class ContentPlanRepository:
                 .where(ContentPlanItemRecord.status == ContentPlanItemStatus.SCHEDULED.value)
                 .order_by(ContentPlanItemRecord.scheduled_at)
             ).all()
-            return [(record.id, record.scheduled_at) for record in records]
+            return [(record.id, _from_app_timezone_naive(record.scheduled_at, self._app_timezone)) for record in records]
 
     def mark_item_published(self, item_id: int, telegram_message_id: int) -> ContentPlanItem:
         with self._session_factory() as session:
@@ -275,10 +297,9 @@ class ContentPlanRepository:
             raise LookupError(f"Content plan item with id '{item_id}' was not found")
         return record
 
-    @staticmethod
-    def _item_to_schema(record: ContentPlanItemRecord) -> ContentPlanItem:
+    def _item_to_schema(self, record: ContentPlanItemRecord) -> ContentPlanItem:
         return ContentPlanItem(
-            scheduled_at=record.scheduled_at,
+            scheduled_at=_from_app_timezone_naive(record.scheduled_at, self._app_timezone),
             title=record.title,
             text=record.text,
             image_prompt=record.image_prompt,

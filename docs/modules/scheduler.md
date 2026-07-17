@@ -16,7 +16,7 @@
 
 ## Используемые настройки
 
-Актуальный scheduler контент-плана не использует `PUBLISH_INTERVAL_MINUTES` для публикаций. Время берется из БД: `ContentPlanItem.scheduled_at`.
+Актуальный scheduler контент-плана не использует `PUBLISH_INTERVAL_MINUTES` для публикаций. Время берется из БД: `ContentPlanItem.scheduled_at`. Если AI/пользователь дал время без UTC offset, оно нормализуется через `APP_TIMEZONE`, затем хранится и планируется в этом timezone.
 
 `PUBLISH_INTERVAL_MINUTES` остается только для legacy-функции `create_scheduler(...)`.
 

@@ -32,6 +32,7 @@ python app/main.py --check
 - `APP_ENV` — режим окружения, в `prod` обязательны реальные секреты;
 - `DATABASE_URL` — URL SQLite-БД;
 - `PUBLISH_INTERVAL_MINUTES` — legacy-настройка для старой interval-заготовки; в актуальном runtime контент-план публикуется по `scheduled_at` из БД;
+- `APP_TIMEZONE` — IANA timezone, в котором трактуются пользовательские времена контент-плана без явного UTC offset;
 - `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, `OPENROUTER_BASE_URL` — настройки AI-клиента;
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHANNEL_ID` — настройки Telegram-публикатора;
 - настройки темы, языка и формата поста, которые передаются в `AIClient` через `Settings`.

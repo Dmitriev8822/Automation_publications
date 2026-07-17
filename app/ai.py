@@ -6,6 +6,7 @@ import base64
 import binascii
 import json
 import logging
+from datetime import datetime
 from collections.abc import Mapping
 from typing import Any, Protocol
 
@@ -149,7 +150,8 @@ class AIClient:
             response = ContentPlanResponse.model_validate(payload)
         except ValidationError as exc:
             raise OpenRouterResponseError("OpenRouter returned an invalid content plan payload") from exc
-        return response.plan.model_copy(update={"raw_request": description})
+        plan = self._normalize_content_plan_datetimes(response.plan)
+        return plan.model_copy(update={"raw_request": description})
 
     def generate_image(self, post: GeneratedPost) -> ImageAsset | None:
         """Generate an image asset through OpenRouter's dedicated Image API."""
@@ -367,12 +369,36 @@ class AIClient:
         return "Return only JSON. You are a Telegram channel editor planning scheduled posts."
 
     def _content_plan_user_prompt(self, description: str) -> str:
+        now = datetime.now(self.settings.timezone)
         return (
             f"Convert this free-form content plan request into a structured plan in {self.settings.post_language}. "
-            "Choose explicit ISO-8601 scheduled_at timestamps for every item, keep posts Telegram-ready, "
+            f"Current application time is {now.isoformat()} in timezone {self.settings.app_timezone}. "
+            f"Interpret user times without an explicit timezone as {self.settings.app_timezone}. "
+            "Choose explicit ISO-8601 scheduled_at timestamps with UTC offset for every item, keep posts Telegram-ready, "
             "and return JSON object with key 'plan'. Plan fields: title, period_start, period_end, items. "
             "Each item fields: scheduled_at, title, text, image_prompt, optional source_url. "
             f"User request: {description}"
+        )
+
+
+    def _normalize_content_plan_datetimes(self, plan: ContentPlan) -> ContentPlan:
+        """Normalize AI-produced naive datetimes to the configured app timezone."""
+
+        timezone_info = self.settings.timezone
+
+        def normalize(value: datetime) -> datetime:
+            if value.tzinfo is None:
+                return value.replace(tzinfo=timezone_info)
+            return value.astimezone(timezone_info)
+
+        return plan.model_copy(
+            update={
+                "period_start": normalize(plan.period_start),
+                "period_end": normalize(plan.period_end),
+                "items": [
+                    item.model_copy(update={"scheduled_at": normalize(item.scheduled_at)}) for item in plan.items
+                ],
+            }
         )
 
     def _post_system_prompt(self) -> str:
