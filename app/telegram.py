@@ -178,7 +178,8 @@ class TelegramPublisher:
         )
         def handle_content_plan_start(message: Any) -> None:
             chat_id = self._message_chat_id(message)
-            self._content_plan_dialogs[chat_id] = {"awaiting_description": True}
+            chat_key = self._chat_key(chat_id)
+            self._content_plan_dialogs[chat_key] = {"awaiting_description": True}
             self._send_control_message(
                 chat_id,
                 "Опишите контент план в свободном формате: период, темы и желаемое расписание.",
@@ -189,7 +190,8 @@ class TelegramPublisher:
         )
         def handle_content_plan_dialog(message: Any) -> None:
             chat_id = self._message_chat_id(message)
-            state = self._content_plan_dialogs.get(chat_id, {})
+            chat_key = self._chat_key(chat_id)
+            state = self._content_plan_dialogs.get(chat_key, {})
             text = getattr(message, "text", "") or ""
 
             if state.get("awaiting_description"):
@@ -210,7 +212,7 @@ class TelegramPublisher:
                     )
                     return
                 approve_callback(plan)
-                self._content_plan_dialogs.pop(chat_id, None)
+                self._content_plan_dialogs.pop(chat_key, None)
                 self._send_control_message(
                     chat_id,
                     "✅ Контент план согласован и сохранен. Посты будут опубликованы по расписанию.",
@@ -221,8 +223,8 @@ class TelegramPublisher:
             self._generate_and_send_content_plan(chat_id, state, generate_callback)
 
     def _is_content_plan_dialog_message(self, message: Any) -> bool:
-        chat_id = self._message_chat_id(message)
-        return chat_id in self._content_plan_dialogs
+        chat_key = self._message_chat_key(message)
+        return chat_key in self._content_plan_dialogs
 
     def _generate_and_send_content_plan(
         self,
@@ -280,7 +282,8 @@ class TelegramPublisher:
         )
         def handle_reminders_start(message: Any) -> None:
             chat_id = self._message_chat_id(message)
-            self._reminder_dialogs[chat_id] = {"awaiting_minutes": True}
+            chat_key = self._chat_key(chat_id)
+            self._reminder_dialogs[chat_key] = {"awaiting_minutes": True}
             self._send_control_message(
                 chat_id,
                 "За сколько минут до публикации напоминать? Отправьте число минут или 0, чтобы отключить напоминания.",
@@ -295,7 +298,7 @@ class TelegramPublisher:
             if text.lower() in {"0", "нет", "отключить", "выключить", "off"}:
                 self.reminder_minutes_before = None
                 self.reminder_chat_id = chat_id
-                self._reminder_dialogs.pop(chat_id, None)
+                self._reminder_dialogs.pop(self._chat_key(chat_id), None)
                 if reminder_minutes_callback is not None:
                     reminder_minutes_callback(None, chat_id)
                 self._send_control_message(
@@ -315,7 +318,7 @@ class TelegramPublisher:
                 return
             self.reminder_minutes_before = minutes
             self.reminder_chat_id = chat_id
-            self._reminder_dialogs.pop(chat_id, None)
+            self._reminder_dialogs.pop(self._chat_key(chat_id), None)
             if reminder_minutes_callback is not None:
                 reminder_minutes_callback(minutes, chat_id)
             self._send_control_message(
@@ -323,7 +326,7 @@ class TelegramPublisher:
             )
 
     def _is_reminder_dialog_message(self, message: Any) -> bool:
-        return self._message_chat_id(message) in self._reminder_dialogs
+        return self._message_chat_key(message) in self._reminder_dialogs
 
     def send_publication_reminder(
         self,
@@ -333,7 +336,7 @@ class TelegramPublisher:
     ) -> int:
         """Send pre-publication approval controls for a scheduled post."""
 
-        self._pending_reminder_items[chat_id] = item_id
+        self._pending_reminder_items[self._chat_key(chat_id)] = item_id
         text = f"⏰ Скоро публикация #{item_id}: {item.title}\n\n{item.text}\n\nКартинка: {item.image_prompt or 'без описания'}"
         return self._send_control_message(
             chat_id, text, reply_markup=self._reminder_approval_keyboard()
@@ -393,7 +396,8 @@ class TelegramPublisher:
         )
         def handle_publication_approval(message: Any) -> None:
             chat_id = self._message_chat_id(message)
-            item_id = self._pending_reminder_items.get(chat_id)
+            chat_key = self._chat_key(chat_id)
+            item_id = self._pending_reminder_items.get(chat_key)
             if item_id is None:
                 self._send_control_message(chat_id, "Нет поста, ожидающего решения.")
                 return
@@ -401,13 +405,13 @@ class TelegramPublisher:
             try:
                 if text == APPROVE_REMINDER_BUTTON_TEXT:
                     approve_callback(item_id)
-                    self._pending_reminder_items.pop(chat_id, None)
+                    self._pending_reminder_items.pop(chat_key, None)
                     self._send_control_message(
                         chat_id, "✅ Пост одобрен и опубликован."
                     )
                 elif text == REJECT_REMINDER_BUTTON_TEXT:
                     reject_callback(item_id)
-                    self._pending_reminder_items.pop(chat_id, None)
+                    self._pending_reminder_items.pop(chat_key, None)
                     self._send_control_message(chat_id, "❌ Публикация отменена.")
                 elif text == REGENERATE_REMINDER_TEXT_BUTTON_TEXT:
                     item = regenerate_text_callback(item_id)
@@ -513,6 +517,15 @@ class TelegramPublisher:
                 "Telegram control message failed: response does not contain message_id"
             )
         return message_id
+
+    @staticmethod
+    def _chat_key(chat_id: int | str) -> str:
+        """Return a stable key for Telegram chat ids from DB and incoming updates."""
+
+        return str(chat_id)
+
+    def _message_chat_key(self, message: Any) -> str:
+        return self._chat_key(self._message_chat_id(message))
 
     @staticmethod
     def _message_chat_id(message: Any) -> int | str:

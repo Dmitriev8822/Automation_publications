@@ -37,6 +37,7 @@ from app.service import (
     regenerate_content_plan_item_text,
     reject_content_plan_item_publication,
 )
+from app.schemas import ContentPlanItemStatus
 from app.telegram import TelegramPublisher
 
 logger = logging.getLogger(__name__)
@@ -167,6 +168,13 @@ def build_runtime(settings: Settings) -> ApplicationRuntime:
         if telegram_publisher.reminder_chat_id is None:
             return
         item = content_plan_repository.get_item(item_id)
+        if item.status != ContentPlanItemStatus.SCHEDULED:
+            logger.info(
+                "Skipping reminder for content-plan item with status %s: item_id=%s",
+                item.status,
+                item_id,
+            )
+            return
         telegram_publisher.send_publication_reminder(
             telegram_publisher.reminder_chat_id, item_id, item
         )
