@@ -629,10 +629,32 @@ def test_manual_publication_approval_flow_prepares_regenerates_and_approves() ->
     bot.handlers[3]["func"](SimpleNamespace(chat=chat.chat, text=REGENERATE_MANUAL_TEXT_BUTTON_TEXT))
     bot.handlers[3]["func"](SimpleNamespace(chat=chat.chat, text=APPROVE_MANUAL_POST_BUTTON_TEXT))
 
-    assert "Черновик новости" in bot.sent_messages[1]["text"]
-    assert "Новый текст" in bot.sent_messages[2]["text"]
+    assert "Черновик новости" in bot.sent_photos[0]["caption"]
+    assert bot.sent_photos[0]["photo"].getvalue() == b"img"
+    assert "Новый текст" in bot.sent_photos[1]["caption"]
     assert approved == [regenerated[-1]]
     assert "опубликован в группе" in bot.sent_messages[-1]["text"]
+
+
+def test_manual_publication_preview_falls_back_to_text_when_image_send_fails() -> None:
+    bot = FakeBot(photo_error=RuntimeError("preview image failed"))
+    publisher = TelegramPublisher(settings=make_settings(), bot=bot)
+
+    publisher.register_manual_publish_handler(
+        lambda progress: make_manual_draft(),
+        lambda draft: None,
+        lambda draft: draft,
+        lambda draft: draft,
+    )
+
+    bot.handlers[1]["func"](
+        SimpleNamespace(chat=SimpleNamespace(id=555), text=MANUAL_PUBLISH_BUTTON_TEXT)
+    )
+
+    assert bot.sent_photos == []
+    assert "Черновик новости" in bot.sent_messages[-1]["text"]
+    assert "Картинка: есть" in bot.sent_messages[-1]["text"]
+    assert bot.sent_messages[-1]["reply_markup"] is not None
 
 
 def test_content_plan_menu_can_view_existing_items_and_start_compose() -> None:
