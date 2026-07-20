@@ -611,14 +611,28 @@ class TelegramPublisher:
         chat_id: int | str,
         item_id: int,
         item: ContentPlanItem,
+        image: ImageAsset | None = None,
     ) -> int:
         """Send pre-publication approval controls for a scheduled post."""
 
         self._pending_reminder_items[self._chat_key(chat_id)] = item_id
         text = f"⏰ Скоро публикация #{item_id}: {item.title}\n\n{item.text}\n\nКартинка: {item.image_prompt or 'без описания'}"
-        return self._send_control_message(
-            chat_id, text, reply_markup=self._reminder_approval_keyboard()
-        )
+        reply_markup = self._reminder_approval_keyboard()
+        if image is None:
+            return self._send_control_message(chat_id, text, reply_markup=reply_markup)
+
+        try:
+            return self._send_control_photo(
+                chat_id, image, text, reply_markup=reply_markup
+            )
+        except Exception:
+            logger.warning(
+                "Could not send content-plan reminder image preview to chat_id=%s item_id=%s; sending text-only preview",
+                chat_id,
+                item_id,
+                exc_info=True,
+            )
+            return self._send_control_message(chat_id, text, reply_markup=reply_markup)
 
     @staticmethod
     def _reminder_approval_keyboard() -> types.ReplyKeyboardMarkup:

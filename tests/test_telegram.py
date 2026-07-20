@@ -525,6 +525,20 @@ def test_content_plan_dialog_reports_generation_error_without_reraising() -> Non
     assert "OpenRouter request failed" in bot.sent_messages[-1]["text"]
 
 
+def test_content_plan_publication_reminder_sends_image_preview() -> None:
+    bot = FakeBot()
+    publisher = TelegramPublisher(settings=make_settings(), bot=bot)
+    image = ImageAsset(data=b"image-bytes", mime_type="image/png")
+
+    message_id = publisher.send_publication_reminder(777, 42, make_plan().items[0], image)
+
+    assert message_id == 202
+    assert bot.sent_photos
+    assert bot.sent_photos[-1]["chat_id"] == 777
+    assert "Скоро публикация #42" in bot.sent_photos[-1]["caption"]
+    assert bot.sent_photos[-1]["reply_markup"] is not None
+
+
 def test_publication_approval_handler_matches_persisted_string_chat_id() -> None:
     bot = FakeBot()
     publisher = TelegramPublisher(settings=make_settings(), bot=bot)
