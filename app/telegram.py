@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import urllib.request
 from contextlib import nullcontext
 from collections.abc import Callable
 from io import BytesIO
@@ -106,6 +107,7 @@ class TelegramPublisher:
         self,
         settings: Settings | None = None,
         bot: TelegramBotProtocol | None = None,
+        image_url_fetcher: Callable[[str], tuple[bytes, str | None]] | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self.channel_id = self._require_setting(
@@ -117,6 +119,7 @@ class TelegramPublisher:
             "TELEGRAM_BOT_TOKEN is required to publish to Telegram",
         )
         self.bot = bot or telebot.TeleBot(token)
+        self._image_url_fetcher = image_url_fetcher or self._fetch_image_url
         self._content_plan_dialogs: dict[int | str, dict[str, Any]] = {}
         self._manual_post_dialogs: dict[int | str, ManualPublicationDraft] = {}
         self._reminder_dialogs: dict[int | str, dict[str, Any]] = {}
@@ -831,26 +834,40 @@ class TelegramPublisher:
                 caption=text,
             )
 
+        caption = text[: TELEGRAM_PHOTO_CAPTION_MAX_LENGTH - 1].rstrip() + "…"
         photo_message = self.bot.send_photo(
             chat_id=self.channel_id,
             photo=photo,
+            caption=caption,
         )
-        text_message = self.bot.send_message(chat_id=self.channel_id, text=text)
-        return text_message or photo_message
+        self.bot.send_message(chat_id=self.channel_id, text=text)
+        return photo_message
 
-    @staticmethod
-    def _photo_payload(image: ImageAsset):
+    def _photo_payload(self, image: ImageAsset):
         if image.data is not None:
-            payload = BytesIO(image.data)
-            payload.name = (
-                f"telegram-image{TelegramPublisher._extension_for_mime_type(image.mime_type)}"
-            )
-            return nullcontext(payload)
+            return nullcontext(self._bytes_photo_payload(image.data, image.mime_type))
         if image.file_path is not None:
             return Path(image.file_path).open("rb")
         if image.url is not None:
-            return nullcontext(str(image.url))
+            image_data, mime_type = self._image_url_fetcher(str(image.url))
+            return nullcontext(
+                self._bytes_photo_payload(image_data, mime_type or image.mime_type)
+            )
         raise ValueError("ImageAsset must contain data, url, or file_path")
+
+    @staticmethod
+    def _bytes_photo_payload(image_data: bytes, mime_type: str) -> BytesIO:
+        payload = BytesIO(image_data)
+        payload.name = (
+            f"telegram-image{TelegramPublisher._extension_for_mime_type(mime_type)}"
+        )
+        return payload
+
+    @staticmethod
+    def _fetch_image_url(url: str) -> tuple[bytes, str | None]:
+        with urllib.request.urlopen(url, timeout=30) as response:
+            content_type = response.headers.get("Content-Type")
+            return response.read(), content_type
 
     @staticmethod
     def _extension_for_mime_type(mime_type: str) -> str:

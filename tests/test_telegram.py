@@ -124,7 +124,7 @@ def test_publish_post_with_image_uses_mime_type_extension() -> None:
     assert bot.sent_photos[0]["photo"].name == "telegram-image.png"
 
 
-def test_publish_post_with_long_text_sends_photo_before_text_message() -> None:
+def test_publish_post_with_long_text_keeps_image_caption_and_sends_full_text() -> None:
     bot = FakeBot()
     publisher = TelegramPublisher(settings=make_settings(), bot=bot)
     post = make_post().model_copy(update={"text": "x" * 1100})
@@ -132,22 +132,34 @@ def test_publish_post_with_long_text_sends_photo_before_text_message() -> None:
 
     message_id = publisher.publish_post(post, image)
 
-    assert message_id == 101
+    assert message_id == 202
     assert len(bot.sent_photos) == 1
-    assert "caption" not in bot.sent_photos[0]
+    assert len(bot.sent_photos[0]["caption"]) == 1024
+    assert bot.sent_photos[0]["caption"].endswith("…")
     assert bot.sent_messages == [{"chat_id": "@test_channel", "text": "x" * 1100}]
     assert bot.sent_photos[0]["photo"].name == "telegram-image.jpg"
 
 
-def test_publish_post_with_image_url() -> None:
+def test_publish_post_with_image_url_downloads_and_uploads_bytes() -> None:
     bot = FakeBot()
-    publisher = TelegramPublisher(settings=make_settings(), bot=bot)
+    fetched_urls: list[str] = []
+
+    def fetch_image(url: str) -> tuple[bytes, str | None]:
+        fetched_urls.append(url)
+        return b"downloaded-image", "image/png"
+
+    publisher = TelegramPublisher(
+        settings=make_settings(), bot=bot, image_url_fetcher=fetch_image
+    )
     image = ImageAsset(url="https://example.com/image.png")
 
     message_id = publisher.publish_post(make_post(), image)
 
     assert message_id == 202
-    assert bot.sent_photos[0]["photo"] == "https://example.com/image.png"
+    assert fetched_urls == ["https://example.com/image.png"]
+    sent_photo = bot.sent_photos[0]["photo"]
+    assert sent_photo.getvalue() == b"downloaded-image"
+    assert sent_photo.name == "telegram-image.png"
 
 
 def test_publish_post_falls_back_to_text_when_telegram_cannot_process_image() -> None:
