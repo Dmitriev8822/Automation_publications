@@ -317,18 +317,15 @@ def approve_content_plan_item_publication(
     content_plan_repository: ContentPlanRepositoryProtocol,
     ai_client: AIClientProtocol | None = None,
 ) -> ContentPlanItem:
-    """Publish one content-plan item immediately after user approval."""
+    """Keep one content-plan item scheduled after user approval.
 
-    item = content_plan_repository.get_item(item_id)
-    generated_post = GeneratedPost(
-        title=item.title,
-        text=item.text,
-        image_prompt=item.image_prompt,
-        source_url=item.source_url or f"https://content-plan.local/items/{item_id}",
-    )
-    image = ai_client.generate_image(generated_post) if ai_client is not None else None
-    message_id = telegram_publisher.publish_post(generated_post, image)
-    return content_plan_repository.mark_item_published(item_id, message_id)
+    Pre-publication approval is a confirmation that the item should continue to
+    follow its original schedule. Publication still happens only when the
+    scheduler later calls :func:`publish_due_content_plan_items`.
+    """
+
+    _ = telegram_publisher, ai_client
+    return content_plan_repository.get_item(item_id)
 
 
 def reject_content_plan_item_publication(
