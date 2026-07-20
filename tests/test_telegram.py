@@ -10,7 +10,11 @@ from telebot.apihelper import ApiTelegramException
 
 from app.config import Settings
 from app.schemas import GeneratedPost, ImageAsset
-from app.telegram import MANUAL_PUBLISH_BUTTON_TEXT, TelegramPublisher
+from app.telegram import (
+    MANUAL_PUBLISH_BUTTON_TEXT,
+    START_INSTRUCTION_TEXT,
+    TelegramPublisher,
+)
 
 
 @dataclass
@@ -32,6 +36,7 @@ class FakeBot:
         self.sent_messages: list[dict] = []
         self.sent_photos: list[dict] = []
         self.handlers: list[dict] = []
+        self.commands: list = []
         self.polling_started = False
 
     def send_message(self, chat_id: str, text: str, **kwargs):
@@ -65,6 +70,10 @@ class FakeBot:
         if self.polling_error is not None:
             raise self.polling_error
         return SimpleNamespace(username="test_news_bot", first_name="Test News Bot")
+
+    def set_my_commands(self, commands):
+        self.commands = commands
+        return True
 
 
 def make_settings(**overrides) -> Settings:
@@ -233,11 +242,44 @@ def test_register_manual_publish_handler_sends_button_and_progress_messages() ->
 
     assert len(bot.handlers) == 2
     assert bot.sent_messages[0]["chat_id"] == 555
-    assert "Нажмите кнопку" in bot.sent_messages[0]["text"]
+    assert "Как пользоваться ботом" in bot.sent_messages[0]["text"]
+    assert MANUAL_PUBLISH_BUTTON_TEXT in bot.sent_messages[0]["text"]
     assert bot.sent_messages[1]["text"] == "🚀 Запускаю ручную публикацию новости..."
     assert bot.sent_messages[2]["text"] == "🔎 fake progress"
     assert bot.sent_messages[-1]["text"] == "🎉 Ручная публикация успешно завершена."
     assert progress_messages == ["called"]
+
+
+def test_start_command_sends_bot_usage_instruction_with_main_menu() -> None:
+    bot = FakeBot()
+    publisher = TelegramPublisher(settings=make_settings(), bot=bot)
+
+    publisher.register_manual_publish_handler(
+        lambda progress: make_manual_draft(),
+        lambda draft: None,
+        lambda draft: draft,
+        lambda draft: draft,
+    )
+    bot.handlers[0]["func"](
+        SimpleNamespace(chat=SimpleNamespace(id=555), text="/start")
+    )
+
+    assert bot.sent_messages[-1]["text"] == START_INSTRUCTION_TEXT
+    assert "Как пользоваться ботом" in bot.sent_messages[-1]["text"]
+    assert "/menu" in bot.sent_messages[-1]["text"]
+    assert bot.sent_messages[-1]["reply_markup"] is not None
+
+
+def test_register_manual_publish_handler_sets_start_and_menu_quick_commands() -> None:
+    bot = FakeBot()
+    publisher = TelegramPublisher(settings=make_settings(), bot=bot)
+
+    publisher.register_manual_publish_handler(lambda progress: None)
+
+    assert [(command.command, command.description) for command in bot.commands] == [
+        ("start", "Открыть главное меню"),
+        ("menu", "Показать меню"),
+    ]
 
 
 def test_manual_publish_handler_reports_no_news() -> None:
