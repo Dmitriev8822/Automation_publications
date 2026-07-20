@@ -255,7 +255,7 @@ def test_reports_ai_fetch_error_when_news_list_is_empty() -> None:
         "ℹ️ Свежих неопубликованных новостей не найдено.",
     ]
 
-from app.service import publish_due_content_plan_items
+from app.service import approve_content_plan_item_publication, publish_due_content_plan_items
 from app.schemas import ContentPlanItem, ContentPlanItemStatus
 from datetime import datetime, timezone
 
@@ -268,6 +268,10 @@ class FakeContentPlanRepository:
 
     def get_due_items(self):
         return self.items
+
+    def get_item(self, item_id: int) -> ContentPlanItem:
+        assert item_id == self.items[0][0]
+        return self.items[0][1]
 
     def mark_item_published(self, item_id: int, telegram_message_id: int) -> ContentPlanItem:
         self.published.append((item_id, telegram_message_id))
@@ -288,3 +292,14 @@ def test_publish_due_content_plan_items_publishes_due_items() -> None:
     assert result[0].status is ContentPlanItemStatus.PUBLISHED
     assert repo.published == [(5, 777)]
     assert publisher.published[0][0].title == "Plan post"
+
+
+def test_approve_content_plan_item_publication_keeps_item_scheduled() -> None:
+    repo = FakeContentPlanRepository()
+    publisher = FakeTelegramPublisher()
+
+    result = approve_content_plan_item_publication(5, publisher, repo)
+
+    assert result.status is ContentPlanItemStatus.SCHEDULED
+    assert publisher.published == []
+    assert repo.published == []
