@@ -19,7 +19,7 @@ image = ai_client.generate_image(generated_post)
 
 - `find_fresh_news() -> list[News]` — новости уже отсортированы по приоритету публикации, самая подходящая первая.
 - `generate_post(news: News) -> GeneratedPost` — готовый текст поста, заголовок, `image_prompt` и ссылка на источник.
-- `generate_image(post: GeneratedPost) -> ImageAsset | None` — реальное изображение из OpenRouter Images API как байты `data` или URL; возвращает `None`, если генерация изображений отключена или API не вернул пригодный файл.
+- `generate_image(post: GeneratedPost) -> ImageAsset | None` — реальное изображение из OpenRouter Images API как байты `data` или URL; возвращает `None`, если генерация изображений отключена или API не вернул пригодный файл. Причина последнего пропуска сохраняется в `AIClient.last_image_error_message`, чтобы сервис мог показать её пользователю.
 
 ## OpenRouter API
 
@@ -127,7 +127,7 @@ System prompt задаёт роль генератора безопасного 
   безопасно для пайплайна публикаций, потому что сервис может пропустить текущий запуск.
 - `generate_post()` и `generate_image()` выбрасывают понятные исключения, потому что на этих этапах уже выбран
   конкретный материал и ошибку важно видеть вызывающему сервису.
-- Если `ENABLE_IMAGE_GENERATION=false`, `generate_image()` не делает HTTP-запрос и возвращает `None`.
+- Если `ENABLE_IMAGE_GENERATION=false`, `generate_image()` не делает HTTP-запрос, возвращает `None` и сохраняет `last_image_error_message = "ENABLE_IMAGE_GENERATION=false"`. Это дефолтное значение в репозитории, поэтому для реальной генерации картинок в `.env` нужно явно поставить `ENABLE_IMAGE_GENERATION=true`.
 - Клиент пишет подробные консольные логи о запросах к OpenRouter: endpoint, модель, имя ожидаемой JSON-схемы, тему поиска, лимит новостей, наличие API-ключа без вывода секрета, успешное завершение и ошибки HTTP-клиента.
 - При ошибке поиска новостей `find_fresh_news()` сохраняет текст последней ошибки в `AIClient.last_error_message`, чтобы `service.py` мог показать пользователю, что пустой список связан не с отсутствием новостей, а со сбоем запроса. Например, `401 Unauthorized` или `403 Forbidden` означает, что OpenRouter отклонил ключ, доступ к модели или настройки аккаунта, и биллинг не увеличится, потому что запрос не был авторизован.
 
