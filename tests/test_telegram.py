@@ -548,3 +548,77 @@ def test_publication_approval_cancel_closes_pending_item_without_callback() -> N
     assert rejected == []
     assert "Решение по напоминанию закрыто" in bot.sent_messages[-2]["text"]
     assert bot.sent_messages[-1]["text"] == "Нет поста, ожидающего решения."
+
+from app.schemas import News, ManualPublicationDraft
+from app.telegram import (
+    APPROVE_MANUAL_POST_BUTTON_TEXT,
+    REGENERATE_MANUAL_TEXT_BUTTON_TEXT,
+    VIEW_CONTENT_PLAN_BUTTON_TEXT,
+    CREATE_CONTENT_PLAN_BUTTON_TEXT,
+)
+
+
+def make_manual_draft(text: str = "Черновик") -> ManualPublicationDraft:
+    news = News(
+        title="Новость",
+        source_url="https://example.com/manual-news",
+        source_name="Example",
+        summary="Summary",
+    )
+    post = GeneratedPost(
+        title="Пост",
+        text=text,
+        image_prompt="Картинка",
+        source_url="https://example.com/manual-news",
+    )
+    return ManualPublicationDraft(news=news, post=post, image=ImageAsset(data=b"img"))
+
+
+def test_manual_publication_approval_flow_prepares_regenerates_and_approves() -> None:
+    bot = FakeBot()
+    publisher = TelegramPublisher(settings=make_settings(), bot=bot)
+    approved: list[ManualPublicationDraft] = []
+    regenerated: list[ManualPublicationDraft] = []
+
+    publisher.register_manual_publish_handler(
+        lambda progress: make_manual_draft(),
+        approved.append,
+        lambda draft: regenerated.append(make_manual_draft("Новый текст")) or regenerated[-1],
+        lambda draft: draft,
+    )
+
+    chat = SimpleNamespace(chat=SimpleNamespace(id=555))
+    bot.handlers[1]["func"](SimpleNamespace(chat=chat.chat, text=MANUAL_PUBLISH_BUTTON_TEXT))
+    bot.handlers[3]["func"](SimpleNamespace(chat=chat.chat, text=REGENERATE_MANUAL_TEXT_BUTTON_TEXT))
+    bot.handlers[3]["func"](SimpleNamespace(chat=chat.chat, text=APPROVE_MANUAL_POST_BUTTON_TEXT))
+
+    assert "Черновик новости" in bot.sent_messages[1]["text"]
+    assert "Новый текст" in bot.sent_messages[2]["text"]
+    assert approved == [regenerated[-1]]
+    assert "опубликован в группе" in bot.sent_messages[-1]["text"]
+
+
+def test_content_plan_menu_can_view_existing_items_and_start_compose() -> None:
+    bot = FakeBot()
+    publisher = TelegramPublisher(settings=make_settings(), bot=bot)
+    calls: list[tuple[str, list[str]]] = []
+
+    def generate(description: str, context: list[str] | None = None) -> ContentPlan:
+        calls.append((description, list(context or [])))
+        return make_plan()
+
+    publisher.register_content_plan_handler(
+        generate,
+        lambda plan: None,
+        lambda: [(7, make_plan().items[0])],
+    )
+
+    dispatch_text(bot, 555, CONTENT_PLAN_BUTTON_TEXT)
+    dispatch_text(bot, 555, VIEW_CONTENT_PLAN_BUTTON_TEXT)
+    dispatch_text(bot, 555, CONTENT_PLAN_BUTTON_TEXT)
+    dispatch_text(bot, 555, CREATE_CONTENT_PLAN_BUTTON_TEXT)
+    dispatch_text(bot, 555, "план на неделю")
+
+    assert "Выберите действие" in bot.sent_messages[0]["text"]
+    assert "#7" in bot.sent_messages[1]["text"]
+    assert calls == [("план на неделю", [])]
