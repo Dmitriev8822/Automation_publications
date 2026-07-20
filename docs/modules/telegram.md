@@ -10,7 +10,7 @@
 
 - `TelegramPublisher` — адаптер публикации в Telegram.
 - `TelegramPublisher.publish_post(post: GeneratedPost, image: ImageAsset | None = None) -> int` — публикует текстовый пост или изображение с подписью и возвращает `telegram_message_id`.
-- `TelegramPublisher.register_manual_publish_handler(publish_callback)` — регистрирует `/start` и кнопку `📰 Опубликовать новость`; callback получает функцию отправки коротких progress-сообщений пользователю.
+- `TelegramPublisher.register_manual_publish_handler(publish_callback)` — регистрирует `/start`, `/menu`, быстрые команды Telegram для этих пунктов и кнопку `📰 Опубликовать новость`; callback получает функцию отправки коротких progress-сообщений пользователю.
 - `TelegramPublisher.start_manual_polling()` — запускает long polling для обработки команд и кнопки ручной публикации.
 
 ## Настройки
@@ -53,11 +53,11 @@
 
 Если при старте polling появляется ошибка `401 Unauthorized`, Telegram не принял `TELEGRAM_BOT_TOKEN`. Нужно заново скопировать токен у `@BotFather` командой `/token` или перевыпустить его командой `/revoke`, затем обновить `.env` и перезапустить приложение. Для быстрой проверки только Telegram-токена можно выполнить `python app/main.py --check-telegram`: команда делает `getMe`, показывает имя подключенного бота при успехе и не запускает scheduler.
 
-`TELEGRAM_CHANNEL_ID` не используется для получения кнопки в личном чате с ботом: кнопка появляется после `/start`, если polling успешно запущен с правильным токеном. `TELEGRAM_CHANNEL_ID` нужен позже, когда сервис публикует готовую новость в канал. Бот должен быть администратором этого канала с правом публикации сообщений.
+`TELEGRAM_CHANNEL_ID` не используется для получения кнопки в личном чате с ботом: кнопка появляется после `/start` или `/menu`, если polling успешно запущен с правильным токеном. `TELEGRAM_CHANNEL_ID` нужен позже, когда сервис публикует готовую новость в канал. Бот должен быть администратором этого канала с правом публикации сообщений.
 
 ## Ручная публикация по кнопке
 
-`register_manual_publish_handler()` добавляет `/start`, `/menu`, главное меню и сценарий согласования новости:
+`register_manual_publish_handler()` добавляет `/start`, `/menu`, пункты быстрых команд Telegram для этих команд, главное меню и сценарий согласования новости:
 
 1. пользователь нажимает `📰 Опубликовать новость`;
 2. Telegram-модуль вызывает callback подготовки черновика из `app.service`;

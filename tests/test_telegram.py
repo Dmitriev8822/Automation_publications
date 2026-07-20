@@ -32,6 +32,7 @@ class FakeBot:
         self.sent_messages: list[dict] = []
         self.sent_photos: list[dict] = []
         self.handlers: list[dict] = []
+        self.commands: list = []
         self.polling_started = False
 
     def send_message(self, chat_id: str, text: str, **kwargs):
@@ -65,6 +66,10 @@ class FakeBot:
         if self.polling_error is not None:
             raise self.polling_error
         return SimpleNamespace(username="test_news_bot", first_name="Test News Bot")
+
+    def set_my_commands(self, commands):
+        self.commands = commands
+        return True
 
 
 def make_settings(**overrides) -> Settings:
@@ -238,6 +243,18 @@ def test_register_manual_publish_handler_sends_button_and_progress_messages() ->
     assert bot.sent_messages[2]["text"] == "🔎 fake progress"
     assert bot.sent_messages[-1]["text"] == "🎉 Ручная публикация успешно завершена."
     assert progress_messages == ["called"]
+
+
+def test_register_manual_publish_handler_sets_start_and_menu_quick_commands() -> None:
+    bot = FakeBot()
+    publisher = TelegramPublisher(settings=make_settings(), bot=bot)
+
+    publisher.register_manual_publish_handler(lambda progress: None)
+
+    assert [(command.command, command.description) for command in bot.commands] == [
+        ("start", "Открыть главное меню"),
+        ("menu", "Показать меню"),
+    ]
 
 
 def test_manual_publish_handler_reports_no_news() -> None:
