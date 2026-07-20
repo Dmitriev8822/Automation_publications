@@ -17,6 +17,17 @@ from app.schemas import ContentPlan, ContentPlanItem, GeneratedPost, ImageAsset,
 
 logger = logging.getLogger(__name__)
 
+NEWS_POST_TEMPLATE_PROMPT = """
+Editorial style template for generated news posts:
+- Write in Russian unless POST_LANGUAGE says otherwise.
+- Keep the tone clear, lively and neutral-informative; avoid clickbait, bureaucracy and unsupported conclusions.
+- Preserve factual accuracy: use only facts from the supplied news item and do not invent dates, sources or reactions.
+- Use a stable Telegram structure without visible section labels: short title, 1-2 sentence lead, 2-4 compact paragraphs with key details, optional context and one concise closing sentence.
+- Keep wording varied between posts: do not start every post the same way, vary sentence rhythm and vocabulary while preserving the channel style.
+- Respect source-link and hashtag flags exactly.
+- Avoid these filler phrases: "важно отметить", "стоит подчеркнуть", "данная ситуация", "на сегодняшний день".
+""".strip()
+
 
 class AIClientError(RuntimeError):
     """Base exception for AI client errors."""
@@ -596,13 +607,17 @@ class AIClient:
         )
 
     def _post_system_prompt(self) -> str:
-        return "Return only JSON. You write concise Telegram posts from validated news."
+        return (
+            "Return only JSON. You write Telegram news posts from validated news. "
+            "Always follow the editorial style template from the user prompt."
+        )
 
     def _post_user_prompt(self, news: News) -> str:
         return (
-            f"Create a Telegram post in {self.settings.post_language}. Style: {self.settings.post_style}. "
+            f"Create a Telegram post in {self.settings.post_language}. Style setting: {self.settings.post_style}. "
             f"Maximum length: {self.settings.post_max_length} characters. "
             f"Include source link: {self.settings.include_source_link}. Include hashtags: {self.settings.include_hashtags}. "
+            f"Apply this style template: {NEWS_POST_TEMPLATE_PROMPT} "
             f"News title: {news.title}. Summary: {news.summary}. Source: {news.source_name} {news.source_url}. "
             "Return JSON with title, text, image_prompt, source_url."
         )

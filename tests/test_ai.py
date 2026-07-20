@@ -398,3 +398,32 @@ def test_generate_content_plan_parses_structured_plan() -> None:
     assert plan.items[0].scheduled_at.isoformat() == "2026-07-20T10:00:00+03:00"
     assert client.http_client.requests[0]["json"]["response_format"]["json_schema"]["name"] == "content_plan"
     assert "Europe/Moscow" in client.http_client.requests[0]["json"]["messages"][1]["content"]
+
+
+def test_generate_post_includes_editorial_template_prompt() -> None:
+    content = json.dumps(
+        {
+            "title": "AI release",
+            "text": "Fresh Telegram-ready post",
+            "image_prompt": "Editorial illustration of AI automation",
+            "source_url": "https://example.com/ai-release",
+        }
+    )
+    http_client = FakeHTTPClient([content])
+    client = AIClient(settings=make_settings(), http_client=http_client)
+    news = News(
+        title="AI release",
+        source_url="https://example.com/ai-release",
+        source_name="Example",
+        summary="A new AI system was released.",
+    )
+
+    client.generate_post(news)
+
+    payload = http_client.requests[0]["json"]
+    system_prompt = payload["messages"][0]["content"]
+    user_prompt = payload["messages"][1]["content"]
+    assert "Always follow the editorial style template" in system_prompt
+    assert "Editorial style template for generated news posts" in user_prompt
+    assert "do not start every post the same way" in user_prompt
+    assert "Return JSON with title, text, image_prompt, source_url" in user_prompt
