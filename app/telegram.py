@@ -41,6 +41,7 @@ REJECT_REMINDER_BUTTON_TEXT = "❌ Не выкладывать"
 REGENERATE_REMINDER_TEXT_BUTTON_TEXT = "✍️ Перегенерировать текст"
 REGENERATE_REMINDER_IMAGE_BUTTON_TEXT = "🖼️ Перегенерировать картинку"
 TELEGRAM_UNAUTHORIZED_CODE = 401
+TELEGRAM_PHOTO_CAPTION_MAX_LENGTH = 1024
 
 MAIN_MENU_BUTTON_TEXTS = {
     MANUAL_PUBLISH_BUTTON_TEXT,
@@ -143,11 +144,7 @@ class TelegramPublisher:
                 try:
                     photo_context = self._photo_payload(image)
                     with photo_context as photo:
-                        message = self.bot.send_photo(
-                            chat_id=self.channel_id,
-                            photo=photo,
-                            caption=post.text,
-                        )
+                        message = self._send_photo_post(post.text, photo)
                 except Exception as exc:
                     if not self._is_image_process_failed(exc):
                         raise
@@ -826,12 +823,27 @@ class TelegramPublisher:
             and "IMAGE_PROCESS_FAILED" in description
         )
 
+    def _send_photo_post(self, text: str, photo: Any) -> Any:
+        if len(text) <= TELEGRAM_PHOTO_CAPTION_MAX_LENGTH:
+            return self.bot.send_photo(
+                chat_id=self.channel_id,
+                photo=photo,
+                caption=text,
+            )
+
+        photo_message = self.bot.send_photo(
+            chat_id=self.channel_id,
+            photo=photo,
+        )
+        text_message = self.bot.send_message(chat_id=self.channel_id, text=text)
+        return text_message or photo_message
+
     @staticmethod
     def _photo_payload(image: ImageAsset):
         if image.data is not None:
             payload = BytesIO(image.data)
             payload.name = (
-                "telegram-image"  # pyTelegramBotAPI uses it as multipart filename.
+                f"telegram-image{TelegramPublisher._extension_for_mime_type(image.mime_type)}"
             )
             return nullcontext(payload)
         if image.file_path is not None:
@@ -839,6 +851,16 @@ class TelegramPublisher:
         if image.url is not None:
             return nullcontext(str(image.url))
         raise ValueError("ImageAsset must contain data, url, or file_path")
+
+    @staticmethod
+    def _extension_for_mime_type(mime_type: str) -> str:
+        normalized = (mime_type or "").split(";", maxsplit=1)[0].strip().lower()
+        return {
+            "image/jpeg": ".jpg",
+            "image/jpg": ".jpg",
+            "image/png": ".png",
+            "image/webp": ".webp",
+        }.get(normalized, ".jpg")
 
     @staticmethod
     def _manual_publish_keyboard() -> types.ReplyKeyboardMarkup:

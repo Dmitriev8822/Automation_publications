@@ -114,6 +114,31 @@ def test_publish_post_with_image_returns_message_id() -> None:
     assert sent_photo["photo"].getvalue() == b"image-bytes"
 
 
+def test_publish_post_with_image_uses_mime_type_extension() -> None:
+    bot = FakeBot()
+    publisher = TelegramPublisher(settings=make_settings(), bot=bot)
+    image = ImageAsset(data=b"image-bytes", mime_type="image/png")
+
+    publisher.publish_post(make_post(), image)
+
+    assert bot.sent_photos[0]["photo"].name == "telegram-image.png"
+
+
+def test_publish_post_with_long_text_sends_photo_before_text_message() -> None:
+    bot = FakeBot()
+    publisher = TelegramPublisher(settings=make_settings(), bot=bot)
+    post = make_post().model_copy(update={"text": "x" * 1100})
+    image = ImageAsset(data=b"image-bytes", mime_type="image/jpeg")
+
+    message_id = publisher.publish_post(post, image)
+
+    assert message_id == 101
+    assert len(bot.sent_photos) == 1
+    assert "caption" not in bot.sent_photos[0]
+    assert bot.sent_messages == [{"chat_id": "@test_channel", "text": "x" * 1100}]
+    assert bot.sent_photos[0]["photo"].name == "telegram-image.jpg"
+
+
 def test_publish_post_with_image_url() -> None:
     bot = FakeBot()
     publisher = TelegramPublisher(settings=make_settings(), bot=bot)
