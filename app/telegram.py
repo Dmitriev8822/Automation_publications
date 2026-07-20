@@ -99,6 +99,9 @@ class TelegramBotProtocol(Protocol):
     def get_me(self) -> Any:
         """Return information about the configured bot token."""
 
+    def set_my_commands(self, commands: list[Any]) -> Any:
+        """Configure quick bot commands shown by Telegram clients."""
+
 
 class TelegramPublisher:
     """Publish generated posts and optional images to a Telegram channel."""
@@ -179,6 +182,7 @@ class TelegramPublisher:
         """Register /start, /menu and manual publication approval flow."""
 
         logger.info("Registering Telegram manual publication handlers")
+        self._set_quick_commands()
 
         if approve_callback is None:
             @self.bot.message_handler(commands=["start"])
@@ -778,6 +782,16 @@ class TelegramPublisher:
                 self._send_control_message(
                     chat_id, f"❌ Не удалось выполнить действие: {exc}"
                 )
+
+    def _set_quick_commands(self) -> None:
+        """Expose /start and /menu in Telegram quick commands."""
+
+        self.bot.set_my_commands(
+            [
+                types.BotCommand("start", "Открыть главное меню"),
+                types.BotCommand("menu", "Показать меню"),
+            ]
+        )
 
     def start_manual_polling(self) -> None:
         """Start polling for manual publication commands."""
