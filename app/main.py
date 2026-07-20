@@ -41,7 +41,7 @@ from app.service import (
     regenerate_manual_publication_text,
     reject_content_plan_item_publication,
 )
-from app.schemas import ContentPlanItemStatus
+from app.schemas import ContentPlanItem, ContentPlanItemStatus, GeneratedPost, ImageAsset
 from app.telegram import TelegramPublisher
 
 logger = logging.getLogger(__name__)
@@ -202,8 +202,9 @@ def build_runtime(settings: Settings) -> ApplicationRuntime:
                 item_id,
             )
             return
+        image = _generate_content_plan_item_preview_image(item_id, item, ai_client)
         telegram_publisher.send_publication_reminder(
-            telegram_publisher.reminder_chat_id, item_id, item
+            telegram_publisher.reminder_chat_id, item_id, item, image
         )
 
     def configure_reminders(minutes: int | None, chat_id: int | str):
@@ -238,6 +239,30 @@ def build_runtime(settings: Settings) -> ApplicationRuntime:
     return ApplicationRuntime(
         scheduler=scheduler, telegram_publisher=telegram_publisher
     )
+
+
+def _generate_content_plan_item_preview_image(
+    item_id: int, item: ContentPlanItem, ai_client: AIClient
+) -> ImageAsset | None:
+    """Generate an image preview for a scheduled content-plan approval message."""
+
+    if not item.image_prompt:
+        return None
+    generated_post = GeneratedPost(
+        title=item.title,
+        text=item.text,
+        image_prompt=item.image_prompt,
+        source_url=item.source_url or f"https://content-plan.local/items/{item_id}",
+    )
+    try:
+        return ai_client.generate_image(generated_post)
+    except Exception:  # noqa: BLE001 - reminder should still be delivered as text
+        logger.warning(
+            "Could not generate content-plan reminder image preview: item_id=%s",
+            item_id,
+            exc_info=True,
+        )
+        return None
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
