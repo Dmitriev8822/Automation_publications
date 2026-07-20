@@ -17,6 +17,8 @@ from app.schemas import ContentPlan, ContentPlanItem, GeneratedPost, ImageAsset,
 
 logger = logging.getLogger(__name__)
 
+STRUCTURED_OUTPUT_BAD_REQUEST_LIMIT = 3
+
 NEWS_POST_TEMPLATE_PROMPT = """
 Editorial style template for generated news posts:
 - Write in Russian unless POST_LANGUAGE says otherwise.
@@ -96,6 +98,7 @@ class AIClient:
         self.settings = settings or get_settings()
         self.last_error_message: str | None = None
         self.last_image_error_message: str | None = None
+        self._structured_output_bad_request_counts: dict[tuple[str, str], int] = {}
         if http_client is not None:
             self.http_client = http_client
         else:
@@ -271,7 +274,9 @@ class AIClient:
             ) from exc
 
         if not image_response.data:
-            self.last_image_error_message = "OpenRouter Image API returned no image data"
+            self.last_image_error_message = (
+                "OpenRouter Image API returned no image data"
+            )
             logger.warning(
                 "OpenRouter Image API returned no image data for source_url=%s",
                 post.source_url,
@@ -281,7 +286,9 @@ class AIClient:
         item = image_response.data[0]
         image_data = self._decode_image_data(item.b64_json)
         if image_data is None and item.url is None:
-            self.last_image_error_message = "OpenRouter Image API returned an empty image item"
+            self.last_image_error_message = (
+                "OpenRouter Image API returned an empty image item"
+            )
             logger.warning(
                 "OpenRouter Image API returned an empty image item for source_url=%s",
                 post.source_url,
@@ -325,9 +332,7 @@ class AIClient:
             if hasattr(response, "raise_for_status"):
                 response.raise_for_status()
             data = response.json() if hasattr(response, "json") else response
-        except (
-            Exception
-        ) as exc:  # noqa: BLE001 - normalize third-party/client errors for callers
+        except Exception as exc:  # noqa: BLE001 - normalize third-party/client errors for callers
             logger.warning(
                 "OpenRouter image generation request failed: endpoint=%s model=%s error=%s",
                 self.settings.image_generation_url,
@@ -395,10 +400,6 @@ class AIClient:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": {"name": schema_name, "strict": True, "schema": schema},
-            },
         }
         if use_web_search:
             request_payload["tools"] = [self._web_search_tool()]
@@ -407,26 +408,70 @@ class AIClient:
             "Content-Type": "application/json",
         }
 
-        try:
-            data = self._send_chat_completion_request(
-                request_payload, headers, schema_name
-            )
-        except OpenRouterRequestError:
-            logger.warning(
-                "Retrying OpenRouter request with json_object response format: model=%s schema=%s",
+        schema_key = (model, schema_name)
+        if self._should_skip_json_schema(schema_key):
+            logger.info(
+                "Skipping json_schema response format after repeated Bad Request responses: model=%s schema=%s",
                 model,
                 schema_name,
             )
-            fallback_payload = dict(request_payload)
-            fallback_payload["response_format"] = {"type": "json_object"}
+            json_object_payload = dict(request_payload)
+            json_object_payload["response_format"] = {"type": "json_object"}
             data = self._send_chat_completion_request(
-                fallback_payload, headers, schema_name
+                json_object_payload, headers, schema_name
             )
+        else:
+            json_schema_payload = dict(request_payload)
+            json_schema_payload["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {"name": schema_name, "strict": True, "schema": schema},
+            }
+            try:
+                data = self._send_chat_completion_request(
+                    json_schema_payload, headers, schema_name
+                )
+                self._structured_output_bad_request_counts.pop(schema_key, None)
+            except OpenRouterRequestError as exc:
+                self._remember_structured_output_bad_request(schema_key, exc)
+                logger.warning(
+                    "Retrying OpenRouter request with json_object response format: model=%s schema=%s",
+                    model,
+                    schema_name,
+                )
+                fallback_payload = dict(request_payload)
+                fallback_payload["response_format"] = {"type": "json_object"}
+                data = self._send_chat_completion_request(
+                    fallback_payload, headers, schema_name
+                )
 
         if not isinstance(data, dict):
             raise OpenRouterResponseError("OpenRouter response must be a JSON object")
         logger.info("OpenRouter request completed successfully: schema=%s", schema_name)
         return data
+
+    def _should_skip_json_schema(self, schema_key: tuple[str, str]) -> bool:
+        return (
+            self._structured_output_bad_request_counts.get(schema_key, 0)
+            >= STRUCTURED_OUTPUT_BAD_REQUEST_LIMIT
+        )
+
+    def _remember_structured_output_bad_request(
+        self, schema_key: tuple[str, str], exc: OpenRouterRequestError
+    ) -> None:
+        if not self._is_bad_request_error(exc):
+            return
+        self._structured_output_bad_request_counts[schema_key] = (
+            self._structured_output_bad_request_counts.get(schema_key, 0) + 1
+        )
+
+    @staticmethod
+    def _is_bad_request_error(exc: OpenRouterRequestError) -> bool:
+        cause = exc.__cause__
+        response = getattr(cause, "response", None)
+        status_code = getattr(response, "status_code", None)
+        if status_code == 400:
+            return True
+        return "400" in str(exc) and "Bad Request" in str(exc)
 
     def _send_chat_completion_request(
         self,
@@ -443,9 +488,7 @@ class AIClient:
             if hasattr(response, "raise_for_status"):
                 response.raise_for_status()
             return response.json() if hasattr(response, "json") else response
-        except (
-            Exception
-        ) as exc:  # noqa: BLE001 - normalize third-party/client errors for callers
+        except Exception as exc:  # noqa: BLE001 - normalize third-party/client errors for callers
             logger.warning(
                 "OpenRouter request failed: endpoint=%s model=%s schema=%s error=%s",
                 self.settings.chat_completions_url,

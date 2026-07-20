@@ -70,6 +70,19 @@ class FailingThenSuccessfulHTTPClient:
         return FakeResponse({"choices": [{"message": {"content": self.content}}]})
 
 
+class RepeatedBadRequestThenSuccessfulHTTPClient:
+    def __init__(self, content: str) -> None:
+        self.content = content
+        self.requests: list[dict] = []
+
+    def post(self, url: str, **kwargs):
+        self.requests.append({"url": url, **kwargs})
+        response_format = kwargs["json"]["response_format"]["type"]
+        if response_format == "json_schema":
+            raise RuntimeError("400 Bad Request")
+        return FakeResponse({"choices": [{"message": {"content": self.content}}]})
+
+
 def make_settings(**overrides) -> Settings:
     defaults = {
         "openrouter_api_key": "test-key",
@@ -156,7 +169,10 @@ def test_generate_post_does_not_use_web_search_tool() -> None:
         }
     )
     http_client = FakeHTTPClient([content])
-    client = AIClient(settings=make_settings(openrouter_enable_web_search=True), http_client=http_client)
+    client = AIClient(
+        settings=make_settings(openrouter_enable_web_search=True),
+        http_client=http_client,
+    )
     news = News(
         title="AI release",
         source_url="https://example.com/ai-release",
@@ -200,14 +216,18 @@ def test_find_fresh_news_returns_empty_list_on_empty_response() -> None:
 
 
 def test_find_fresh_news_returns_empty_list_on_invalid_json() -> None:
-    client = AIClient(settings=make_settings(), http_client=FakeHTTPClient(["not json"]))
+    client = AIClient(
+        settings=make_settings(), http_client=FakeHTTPClient(["not json"])
+    )
 
     assert client.find_fresh_news() == []
 
 
 def test_generate_image_returns_none_when_disabled() -> None:
     http_client = FakeHTTPClient([])
-    client = AIClient(settings=make_settings(enable_image_generation=False), http_client=http_client)
+    client = AIClient(
+        settings=make_settings(enable_image_generation=False), http_client=http_client
+    )
     post = GeneratedPost(
         title="AI release",
         text="Fresh Telegram-ready post",
@@ -229,7 +249,9 @@ def test_generate_image_parses_url_asset() -> None:
         ]
     }
     http_client = FakeHTTPClient([content])
-    client = AIClient(settings=make_settings(enable_image_generation=True), http_client=http_client)
+    client = AIClient(
+        settings=make_settings(enable_image_generation=True), http_client=http_client
+    )
     post = GeneratedPost(
         title="AI release",
         text="Fresh Telegram-ready post",
@@ -260,7 +282,9 @@ def test_generate_image_decodes_base64_asset() -> None:
         ]
     }
     http_client = FakeHTTPClient([content])
-    client = AIClient(settings=make_settings(enable_image_generation=True), http_client=http_client)
+    client = AIClient(
+        settings=make_settings(enable_image_generation=True), http_client=http_client
+    )
     post = GeneratedPost(
         title="AI release",
         text="Fresh Telegram-ready post",
@@ -282,7 +306,10 @@ def test_generate_image_ignores_nonexistent_file_path_asset() -> None:
             "mime_type": "image/jpeg",
         }
     )
-    client = AIClient(settings=make_settings(enable_image_generation=True), http_client=FakeHTTPClient([content]))
+    client = AIClient(
+        settings=make_settings(enable_image_generation=True),
+        http_client=FakeHTTPClient([content]),
+    )
     post = GeneratedPost(
         title="AI release",
         text="Fresh Telegram-ready post",
@@ -303,7 +330,10 @@ def test_generate_image_decodes_data_url_asset() -> None:
             }
         ]
     }
-    client = AIClient(settings=make_settings(enable_image_generation=True), http_client=FakeHTTPClient([content]))
+    client = AIClient(
+        settings=make_settings(enable_image_generation=True),
+        http_client=FakeHTTPClient([content]),
+    )
     post = GeneratedPost(
         title="AI release",
         text="Fresh Telegram-ready post",
@@ -328,7 +358,10 @@ def test_find_fresh_news_stores_status_and_body_on_http_status_failure() -> None
     client = AIClient(settings=make_settings(), http_client=FailingHTTPStatusClient())
 
     assert client.find_fresh_news() == []
-    assert client.last_error_message == "OpenRouter request failed with HTTP 403 Forbidden: model access denied"
+    assert (
+        client.last_error_message
+        == "OpenRouter request failed with HTTP 403 Forbidden: model access denied"
+    )
 
 
 def test_chat_requests_preserve_online_model_suffix() -> None:
@@ -357,7 +390,9 @@ def test_chat_requests_preserve_online_model_suffix() -> None:
     assert http_client.requests[0]["json"]["model"] == "openai/gpt-4.1-mini:online"
 
 
-def test_find_fresh_news_retries_with_json_object_when_json_schema_request_fails() -> None:
+def test_find_fresh_news_retries_with_json_object_when_json_schema_request_fails() -> (
+    None
+):
     content = json.dumps(
         {
             "news": [
@@ -381,6 +416,67 @@ def test_find_fresh_news_retries_with_json_object_when_json_schema_request_fails
     assert len(http_client.requests) == 2
     assert http_client.requests[0]["json"]["response_format"]["type"] == "json_schema"
     assert http_client.requests[1]["json"]["response_format"]["type"] == "json_object"
+
+
+def test_chat_requests_skip_json_schema_after_repeated_bad_requests() -> None:
+    content = json.dumps(
+        {
+            "title": "AI release",
+            "text": "Fresh Telegram-ready post",
+            "image_prompt": "Editorial illustration of AI automation",
+            "source_url": "https://example.com/ai-release",
+        }
+    )
+    http_client = RepeatedBadRequestThenSuccessfulHTTPClient(content)
+    client = AIClient(settings=make_settings(), http_client=http_client)
+    news = News(
+        title="AI release",
+        source_url="https://example.com/ai-release",
+        source_name="Example",
+        summary="A new AI system was released.",
+    )
+
+    for _ in range(4):
+        client.generate_post(news)
+
+    response_formats = [
+        request["json"]["response_format"]["type"] for request in http_client.requests
+    ]
+    assert response_formats == [
+        "json_schema",
+        "json_object",
+        "json_schema",
+        "json_object",
+        "json_schema",
+        "json_object",
+        "json_object",
+    ]
+
+
+def test_json_schema_bad_request_count_is_per_model_and_schema() -> None:
+    content = json.dumps({"news": []})
+    http_client = RepeatedBadRequestThenSuccessfulHTTPClient(content)
+    client = AIClient(settings=make_settings(), http_client=http_client)
+
+    for _ in range(3):
+        assert client.find_fresh_news() == []
+
+    client.settings.openrouter_model = "openai/other-model"
+    assert client.find_fresh_news() == []
+
+    response_formats = [
+        request["json"]["response_format"]["type"] for request in http_client.requests
+    ]
+    assert response_formats == [
+        "json_schema",
+        "json_object",
+        "json_schema",
+        "json_object",
+        "json_schema",
+        "json_object",
+        "json_schema",
+        "json_object",
+    ]
 
 
 def test_generate_content_plan_parses_structured_plan() -> None:
@@ -410,8 +506,14 @@ def test_generate_content_plan_parses_structured_plan() -> None:
     assert plan.items[0].title == "Первый пост"
     assert plan.items[0].scheduled_at.tzinfo is not None
     assert plan.items[0].scheduled_at.isoformat() == "2026-07-20T10:00:00+03:00"
-    assert client.http_client.requests[0]["json"]["response_format"]["json_schema"]["name"] == "content_plan"
-    assert "Europe/Moscow" in client.http_client.requests[0]["json"]["messages"][1]["content"]
+    assert (
+        client.http_client.requests[0]["json"]["response_format"]["json_schema"]["name"]
+        == "content_plan"
+    )
+    assert (
+        "Europe/Moscow"
+        in client.http_client.requests[0]["json"]["messages"][1]["content"]
+    )
 
 
 def test_generate_post_includes_editorial_template_prompt() -> None:
