@@ -624,9 +624,21 @@ class TelegramPublisher:
             f"Картинка: {image_state}\n\n"
             f"{draft.post.text}"
         )
-        return self._send_control_message(
-            chat_id, text, reply_markup=self._manual_post_approval_keyboard()
-        )
+        reply_markup = self._manual_post_approval_keyboard()
+        if draft.image is None:
+            return self._send_control_message(chat_id, text, reply_markup=reply_markup)
+
+        try:
+            return self._send_control_photo(
+                chat_id, draft.image, text, reply_markup=reply_markup
+            )
+        except Exception:
+            logger.warning(
+                "Could not send manual draft image preview to chat_id=%s; sending text-only preview",
+                chat_id,
+                exc_info=True,
+            )
+            return self._send_control_message(chat_id, text, reply_markup=reply_markup)
 
     @staticmethod
     def _manual_post_approval_keyboard() -> types.ReplyKeyboardMarkup:
@@ -902,6 +914,36 @@ class TelegramPublisher:
         if not isinstance(message_id, int):
             raise RuntimeError(
                 "Telegram control message failed: response does not contain message_id"
+            )
+        return message_id
+
+    def _send_control_photo(
+        self,
+        chat_id: str | int,
+        image: ImageAsset,
+        caption: str,
+        **kwargs: Any,
+    ) -> int:
+        if len(caption) <= TELEGRAM_PHOTO_CAPTION_MAX_LENGTH:
+            with self._photo_payload(image) as photo:
+                message = self.bot.send_photo(
+                    chat_id=chat_id, photo=photo, caption=caption, **kwargs
+                )
+            return self._extract_control_message_id(message, "photo preview")
+
+        preview_caption = (
+            caption[: TELEGRAM_PHOTO_CAPTION_MAX_LENGTH - 1].rstrip() + "…"
+        )
+        with self._photo_payload(image) as photo:
+            self.bot.send_photo(chat_id=chat_id, photo=photo, caption=preview_caption)
+        return self._send_control_message(chat_id, caption, **kwargs)
+
+    @staticmethod
+    def _extract_control_message_id(message: Any, action: str) -> int:
+        message_id = getattr(message, "message_id", None)
+        if not isinstance(message_id, int):
+            raise RuntimeError(
+                f"Telegram control {action} failed: response does not contain message_id"
             )
         return message_id
 
