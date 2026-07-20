@@ -97,6 +97,18 @@ Unit-тесты должны передавать fake-объекты вмест
 
 См. описание выше в этом документе.
 
+
+## Ручное согласование новости
+
+Для схемы ручной публикации добавлены функции:
+
+- `create_manual_publication_draft(ai_client, repository, progress_callback=None) -> ManualPublicationDraft | None` — ищет первую неопубликованную новость, генерирует текст и изображение, но не сохраняет и не публикует черновик до решения пользователя;
+- `publish_manual_publication_draft(draft, telegram_publisher, repository) -> PublishedPost` — после кнопки `Принять` сохраняет `generated`, публикует в Telegram и переводит запись в `published`;
+- `regenerate_manual_publication_text(draft, ai_client) -> ManualPublicationDraft` — заново генерирует текст и картинку для того же источника;
+- `regenerate_manual_publication_image(draft, ai_client) -> ManualPublicationDraft` — заново генерирует только изображение для текущего текста.
+
+Так ручная публикация соответствует пользовательской схеме: подготовка → согласование → принять/отменить/перегенерировать текст/перегенерировать картинку. Legacy-функция `create_and_publish_post()` сохранена для совместимости и автоматического сценария без интерактивного согласования.
+
 ## Выполнение контент-плана
 
 `publish_due_content_plan_items(telegram_publisher, content_plan_repository) -> list[ContentPlanItem]` публикует все пункты согласованных контент-планов, у которых наступил `scheduled_at` и статус остается `scheduled`.

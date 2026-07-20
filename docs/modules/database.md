@@ -109,6 +109,7 @@ if not repository.is_published(str(post.source_url)):
 - `save_plan(plan: ContentPlan) -> int` — сохраняет согласованный план и возвращает id.
 - `get_due_items(now: datetime | None = None) -> list[tuple[int, ContentPlanItem]]` — возвращает пункты со статусом `scheduled`, время которых уже наступило.
 - `get_scheduled_item_slots() -> list[tuple[int, datetime]]` — возвращает id и `scheduled_at` всех еще запланированных пунктов, чтобы scheduler мог поставить отдельный `date`-job на каждый пункт.
+- `list_scheduled_items() -> list[tuple[int, ContentPlanItem]]` — возвращает запланированные пункты для команды `Посмотреть КП` в Telegram-меню.
 - `mark_item_published(item_id: int, telegram_message_id: int) -> ContentPlanItem` — фиксирует успешную публикацию пункта.
 - `mark_item_failed(item_id: int, error_message: str) -> ContentPlanItem` — фиксирует ошибку публикации пункта.
 

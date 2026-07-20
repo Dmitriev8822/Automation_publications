@@ -32,9 +32,13 @@ from app.scheduler import (
 from app.service import (
     approve_content_plan_item_publication,
     create_and_publish_post,
+    create_manual_publication_draft,
     publish_due_content_plan_items,
+    publish_manual_publication_draft,
     regenerate_content_plan_item_image,
     regenerate_content_plan_item_text,
+    regenerate_manual_publication_image,
+    regenerate_manual_publication_text,
     reject_content_plan_item_publication,
 )
 from app.schemas import ContentPlanItemStatus
@@ -120,13 +124,23 @@ def build_runtime(settings: Settings) -> ApplicationRuntime:
             telegram_publisher, content_plan_repository, ai_client
         )
 
-    manual_job = lambda progress: create_and_publish_post(
-        ai_client,
-        telegram_publisher,
-        repository,
-        progress_callback=progress,
+    manual_prepare_job = lambda progress: create_manual_publication_draft(
+        ai_client, repository, progress_callback=progress
     )
-    telegram_publisher.register_manual_publish_handler(manual_job)
+    try:
+        telegram_publisher.register_manual_publish_handler(
+            manual_prepare_job,
+            lambda draft: publish_manual_publication_draft(
+                draft, telegram_publisher, repository
+            ),
+            lambda draft: regenerate_manual_publication_text(draft, ai_client),
+            lambda draft: regenerate_manual_publication_image(draft, ai_client),
+        )
+    except TypeError:
+        logger.warning(
+            "Telegram publisher supports only the legacy manual handler signature"
+        )
+        telegram_publisher.register_manual_publish_handler(manual_prepare_job)
 
     logger.info("Creating content-plan scheduler from persisted scheduled items")
     scheduler = create_content_plan_scheduler(
@@ -160,9 +174,22 @@ def build_runtime(settings: Settings) -> ApplicationRuntime:
         schedule_persistent_reminders()
         return plan_id
 
-    telegram_publisher.register_content_plan_handler(
-        ai_client.generate_content_plan, save_content_plan_and_schedule
+    list_scheduled_items = getattr(
+        content_plan_repository, "list_scheduled_items", lambda: []
     )
+    try:
+        telegram_publisher.register_content_plan_handler(
+            ai_client.generate_content_plan,
+            save_content_plan_and_schedule,
+            list_scheduled_items,
+        )
+    except TypeError:
+        logger.warning(
+            "Telegram publisher supports only the legacy content-plan handler signature"
+        )
+        telegram_publisher.register_content_plan_handler(
+            ai_client.generate_content_plan, save_content_plan_and_schedule
+        )
 
     def reminder_job(item_id: int):
         if telegram_publisher.reminder_chat_id is None:

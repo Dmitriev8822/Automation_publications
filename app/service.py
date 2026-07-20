@@ -6,7 +6,14 @@ import logging
 from collections.abc import Callable
 from typing import Protocol
 
-from app.schemas import ContentPlanItem, GeneratedPost, ImageAsset, News, PublishedPost
+from app.schemas import (
+    ContentPlanItem,
+    GeneratedPost,
+    ImageAsset,
+    ManualPublicationDraft,
+    News,
+    PublishedPost,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,9 +73,80 @@ class ContentPlanRepositoryProtocol(Protocol):
 
     def get_item(self, item_id: int) -> ContentPlanItem: ...
 
+    def list_scheduled_items(self) -> list[tuple[int, ContentPlanItem]]: ...
+
     def update_item_content(
         self, item_id: int, item: ContentPlanItem
     ) -> ContentPlanItem: ...
+
+
+def create_manual_publication_draft(
+    ai_client: AIClientProtocol,
+    repository: PostRepositoryProtocol,
+    progress_callback: ProgressCallback | None = None,
+) -> ManualPublicationDraft | None:
+    """Prepare a news publication draft without posting it to Telegram.
+
+    This supports the manual menu flow: find an unpublished news item, generate
+    text and image, then return the draft for explicit user approval. Nothing is
+    persisted until the user accepts the draft.
+    """
+
+    _notify(progress_callback, "🔎 Ищу свежие новости через OpenRouter...")
+    news = _find_first_unpublished_news(ai_client, repository)
+    if news is None:
+        ai_error = getattr(ai_client, "last_error_message", None)
+        if ai_error:
+            _notify(
+                progress_callback,
+                f"⚠️ OpenRouter не вернул новости из-за ошибки: {ai_error}",
+            )
+        _notify(progress_callback, "ℹ️ Свежих неопубликованных новостей не найдено.")
+        return None
+
+    _notify(progress_callback, f"✅ Новость найдена: {news.title}")
+    _notify(progress_callback, "✍️ Генерирую текст поста через OpenRouter...")
+    post = ai_client.generate_post(news)
+    _notify(progress_callback, "🖼️ Проверяю/генерирую изображение...")
+    image = ai_client.generate_image(post)
+    _notify(progress_callback, "👀 Черновик готов и ожидает согласования.")
+    return ManualPublicationDraft(news=news, post=post, image=image)
+
+
+def publish_manual_publication_draft(
+    draft: ManualPublicationDraft,
+    telegram_publisher: TelegramPublisherProtocol,
+    repository: PostRepositoryProtocol,
+) -> PublishedPost:
+    """Persist and publish a user-approved manual publication draft."""
+
+    source_url = str(draft.post.source_url)
+    try:
+        repository.save_generated(draft.post)
+        message_id = telegram_publisher.publish_post(draft.post, draft.image)
+        return repository.mark_published(source_url, message_id)
+    except Exception as exc:
+        _mark_failed(repository, source_url, exc)
+        raise
+
+
+def regenerate_manual_publication_text(
+    draft: ManualPublicationDraft, ai_client: AIClientProtocol
+) -> ManualPublicationDraft:
+    """Regenerate text for a manual publication draft and refresh its image."""
+
+    post = ai_client.generate_post(draft.news)
+    image = ai_client.generate_image(post)
+    return draft.model_copy(update={"post": post, "image": image})
+
+
+def regenerate_manual_publication_image(
+    draft: ManualPublicationDraft, ai_client: AIClientProtocol
+) -> ManualPublicationDraft:
+    """Regenerate only the image for a manual publication draft."""
+
+    image = ai_client.generate_image(draft.post)
+    return draft.model_copy(update={"image": image})
 
 
 def create_and_publish_post(

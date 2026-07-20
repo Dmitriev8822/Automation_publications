@@ -112,6 +112,14 @@ class ImageAsset(BaseModel):
         return self
 
 
+class ManualPublicationDraft(BaseModel):
+    """Generated news post waiting for user approval before Telegram publication."""
+
+    news: News
+    post: GeneratedPost
+    image: ImageAsset | None = None
+
+
 class PublishedPost(BaseModel):
     """Publication record shared between service, Telegram, and database modules."""
 

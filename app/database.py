@@ -428,6 +428,20 @@ class ContentPlanRepository:
                 for record in records
             ]
 
+    def list_scheduled_items(self) -> list[tuple[int, ContentPlanItem]]:
+        """Return scheduled content-plan items for menu preview."""
+
+        with self._session_factory() as session:
+            records = session.scalars(
+                select(ContentPlanItemRecord)
+                .where(
+                    ContentPlanItemRecord.status
+                    == ContentPlanItemStatus.SCHEDULED.value
+                )
+                .order_by(ContentPlanItemRecord.scheduled_at)
+            ).all()
+            return [(record.id, self._item_to_schema(record)) for record in records]
+
     def mark_item_published(
         self, item_id: int, telegram_message_id: int
     ) -> ContentPlanItem:

@@ -14,11 +14,23 @@ from telebot.apihelper import ApiTelegramException
 from telebot import types
 
 from app.config import Settings, get_settings
-from app.schemas import ContentPlan, ContentPlanItem, GeneratedPost, ImageAsset
+from app.schemas import (
+    ContentPlan,
+    ContentPlanItem,
+    GeneratedPost,
+    ImageAsset,
+    ManualPublicationDraft,
+)
 
 MANUAL_PUBLISH_BUTTON_TEXT = "📰 Опубликовать новость"
 CONTENT_PLAN_BUTTON_TEXT = "🗓️ Контент план"
 REMINDERS_BUTTON_TEXT = "⏰ Напоминания"
+VIEW_CONTENT_PLAN_BUTTON_TEXT = "👀 Посмотреть КП"
+CREATE_CONTENT_PLAN_BUTTON_TEXT = "📝 Составить КП"
+APPROVE_MANUAL_POST_BUTTON_TEXT = "✅ Принять"
+REJECT_MANUAL_POST_BUTTON_TEXT = "❌ Отменить"
+REGENERATE_MANUAL_TEXT_BUTTON_TEXT = "✍️ Перегенерировать текст"
+REGENERATE_MANUAL_IMAGE_BUTTON_TEXT = "🖼️ Перегенерировать картинку"
 BACK_BUTTON_TEXT = "⬅️ Назад"
 MENU_BUTTON_TEXT = "🏠 Меню"
 CANCEL_BUTTON_TEXT = "❌ Отмена"
@@ -36,7 +48,18 @@ MAIN_MENU_BUTTON_TEXTS = {
     REMINDERS_BUTTON_TEXT,
 }
 
+MANUAL_POST_APPROVAL_BUTTON_TEXTS = {
+    APPROVE_MANUAL_POST_BUTTON_TEXT,
+    REJECT_MANUAL_POST_BUTTON_TEXT,
+    REGENERATE_MANUAL_TEXT_BUTTON_TEXT,
+    REGENERATE_MANUAL_IMAGE_BUTTON_TEXT,
+    MENU_BUTTON_TEXT,
+    CANCEL_BUTTON_TEXT,
+}
+
 CONTENT_PLAN_DIALOG_BUTTON_TEXTS = {
+    VIEW_CONTENT_PLAN_BUTTON_TEXT,
+    CREATE_CONTENT_PLAN_BUTTON_TEXT,
     REGENERATE_CONTENT_PLAN_BUTTON_TEXT,
     APPROVE_CONTENT_PLAN_BUTTON_TEXT,
     BACK_BUTTON_TEXT,
@@ -94,6 +117,7 @@ class TelegramPublisher:
         )
         self.bot = bot or telebot.TeleBot(token)
         self._content_plan_dialogs: dict[int | str, dict[str, Any]] = {}
+        self._manual_post_dialogs: dict[int | str, ManualPublicationDraft] = {}
         self._reminder_dialogs: dict[int | str, dict[str, Any]] = {}
         self.reminder_minutes_before: int | None = None
         self.reminder_chat_id: int | str | None = None
@@ -147,18 +171,61 @@ class TelegramPublisher:
 
     def register_manual_publish_handler(
         self,
-        publish_callback: Callable[[Callable[[str], None]], Any],
+        prepare_callback: Callable[[Callable[[str], None]], ManualPublicationDraft | None],
+        approve_callback: Callable[[ManualPublicationDraft], Any] | None = None,
+        regenerate_text_callback: Callable[[ManualPublicationDraft], ManualPublicationDraft] | None = None,
+        regenerate_image_callback: Callable[[ManualPublicationDraft], ManualPublicationDraft] | None = None,
     ) -> None:
-        """Register /start and button handlers for manual publication from the bot chat."""
+        """Register /start, /menu and manual publication approval flow."""
 
         logger.info("Registering Telegram manual publication handlers")
 
+        if approve_callback is None:
+            @self.bot.message_handler(commands=["start"])
+            def handle_start(message: Any) -> None:
+                self._send_control_message(
+                    self._message_chat_id(message),
+                    "Готов публиковать новости. Нажмите кнопку ниже, чтобы запустить публикацию вручную.",
+                    reply_markup=self._manual_publish_keyboard(),
+                )
+
+            @self.bot.message_handler(
+                func=lambda message: getattr(message, "text", None)
+                == MANUAL_PUBLISH_BUTTON_TEXT
+            )
+            def handle_manual_publish(message: Any) -> None:
+                chat_id = self._message_chat_id(message)
+
+                def progress(message_text: str) -> None:
+                    self._send_control_message(chat_id, message_text)
+
+                self._send_control_message(
+                    chat_id, "🚀 Запускаю ручную публикацию новости..."
+                )
+                try:
+                    result = prepare_callback(progress)
+                except Exception as exc:
+                    self._send_control_message(
+                        chat_id, f"❌ Публикация завершилась ошибкой: {exc}"
+                    )
+                    return
+
+                if result is None:
+                    self._send_control_message(
+                        chat_id, "ℹ️ Публикация не выполнена: нет новых новостей."
+                    )
+                else:
+                    self._send_control_message(
+                        chat_id, "🎉 Ручная публикация успешно завершена."
+                    )
+
+            return
+
         @self.bot.message_handler(commands=["start"])
         def handle_start(message: Any) -> None:
-            self._send_control_message(
+            self._send_main_menu(
                 self._message_chat_id(message),
-                "Готов публиковать новости. Нажмите кнопку ниже, чтобы запустить публикацию вручную.",
-                reply_markup=self._manual_publish_keyboard(),
+                "Готов публиковать новости и работать с контент-планом. Выберите действие в меню.",
             )
 
         @self.bot.message_handler(
@@ -167,36 +234,112 @@ class TelegramPublisher:
         )
         def handle_manual_publish(message: Any) -> None:
             chat_id = self._message_chat_id(message)
+            chat_key = self._chat_key(chat_id)
+            self._content_plan_dialogs.pop(chat_key, None)
+            self._reminder_dialogs.pop(chat_key, None)
 
             def progress(message_text: str) -> None:
                 self._send_control_message(chat_id, message_text)
 
-            self._send_control_message(
-                chat_id, "🚀 Запускаю ручную публикацию новости..."
-            )
+            self._send_control_message(chat_id, "🚀 Готовлю черновик новости...")
             try:
-                result = publish_callback(progress)
+                draft = prepare_callback(progress)
             except Exception as exc:
                 self._send_control_message(
-                    chat_id, f"❌ Публикация завершилась ошибкой: {exc}"
+                    chat_id, f"❌ Подготовка новости завершилась ошибкой: {exc}"
                 )
                 return
 
-            if result is None:
+            if draft is None:
                 self._send_control_message(
-                    chat_id, "ℹ️ Публикация не выполнена: нет новых новостей."
+                    chat_id, "ℹ️ Публикация не выполнена: нет новых новостей.",
+                    reply_markup=self._manual_publish_keyboard(),
                 )
-            else:
-                self._send_control_message(
-                    chat_id, "🎉 Ручная публикация успешно завершена."
-                )
+                return
+
+            if approve_callback is None:
+                self._send_control_message(chat_id, "🎉 Ручная публикация успешно завершена.")
+                return
+
+            self._manual_post_dialogs[chat_key] = draft
+            self._send_manual_post_draft(chat_id, draft)
+
+        @self.bot.message_handler(commands=["menu"])
+        def handle_menu(message: Any) -> None:
+            self._send_main_menu(self._message_chat_id(message), "Главное меню")
+
+        @self.bot.message_handler(
+            func=lambda message: self._message_text(message)
+            in MANUAL_POST_APPROVAL_BUTTON_TEXTS
+        )
+        def handle_manual_post_approval(message: Any) -> None:
+            chat_id = self._message_chat_id(message)
+            chat_key = self._chat_key(chat_id)
+            draft = self._manual_post_dialogs.get(chat_key)
+            if draft is None:
+                self._send_control_message(chat_id, "Нет новости, ожидающей согласования.")
+                return
+            text = self._message_text(message)
+            try:
+                if text == APPROVE_MANUAL_POST_BUTTON_TEXT:
+                    if approve_callback is None:
+                        raise RuntimeError("Approve callback is not configured")
+                    approve_callback(draft)
+                    self._manual_post_dialogs.pop(chat_key, None)
+                    self._send_control_message(
+                        chat_id,
+                        "✅ Пост принят, опубликован в группе и сохранен в БД.",
+                        reply_markup=self._manual_publish_keyboard(),
+                    )
+                elif text in {REJECT_MANUAL_POST_BUTTON_TEXT, MENU_BUTTON_TEXT, CANCEL_BUTTON_TEXT}:
+                    self._manual_post_dialogs.pop(chat_key, None)
+                    self._send_main_menu(chat_id, "❌ Публикация новости отменена.")
+                elif text == REGENERATE_MANUAL_TEXT_BUTTON_TEXT:
+                    if regenerate_text_callback is None:
+                        raise RuntimeError("Text regeneration callback is not configured")
+                    draft = regenerate_text_callback(draft)
+                    self._manual_post_dialogs[chat_key] = draft
+                    self._send_manual_post_draft(chat_id, draft)
+                elif text == REGENERATE_MANUAL_IMAGE_BUTTON_TEXT:
+                    if regenerate_image_callback is None:
+                        raise RuntimeError("Image regeneration callback is not configured")
+                    draft = regenerate_image_callback(draft)
+                    self._manual_post_dialogs[chat_key] = draft
+                    self._send_manual_post_draft(chat_id, draft)
+            except Exception as exc:
+                self._send_control_message(chat_id, f"❌ Не удалось выполнить действие: {exc}")
 
     def register_content_plan_handler(
         self,
         generate_callback: Callable[[str], ContentPlan],
         approve_callback: Callable[[ContentPlan], Any],
+        list_callback: Callable[[], list[tuple[int, ContentPlanItem]]] | None = None,
     ) -> None:
         """Register a Telegram dialog for generating and approving content plans."""
+
+        if list_callback is None:
+            @self.bot.message_handler(
+                func=lambda message: getattr(message, "text", None)
+                == CONTENT_PLAN_BUTTON_TEXT
+            )
+            def handle_content_plan_start(message: Any) -> None:
+                chat_id = self._message_chat_id(message)
+                chat_key = self._chat_key(chat_id)
+                self._reminder_dialogs.pop(chat_key, None)
+                self._content_plan_dialogs[chat_key] = {"awaiting_description": True}
+                self._send_control_message(
+                    chat_id,
+                    "Опишите контент план в свободном формате: период, темы и желаемое расписание.",
+                    reply_markup=self._content_plan_description_keyboard(),
+                )
+
+            @self.bot.message_handler(
+                func=lambda message: self._is_content_plan_dialog_message(message)
+            )
+            def handle_content_plan_dialog(message: Any) -> None:
+                self._handle_content_plan_dialog_message(message, generate_callback, approve_callback)
+
+            return
 
         @self.bot.message_handler(
             func=lambda message: getattr(message, "text", None)
@@ -205,7 +348,45 @@ class TelegramPublisher:
         def handle_content_plan_start(message: Any) -> None:
             chat_id = self._message_chat_id(message)
             chat_key = self._chat_key(chat_id)
+            self._manual_post_dialogs.pop(chat_key, None)
             self._reminder_dialogs.pop(chat_key, None)
+            self._content_plan_dialogs.pop(chat_key, None)
+            if list_callback is None:
+                self._content_plan_dialogs[chat_key] = {"awaiting_description": True}
+                self._send_control_message(
+                    chat_id,
+                    "Опишите контент план в свободном формате: период, темы и желаемое расписание.",
+                    reply_markup=self._content_plan_description_keyboard(),
+                )
+                return
+            self._send_control_message(
+                chat_id,
+                "Выберите действие с контент-планом.",
+                reply_markup=self._content_plan_menu_keyboard(),
+            )
+
+        @self.bot.message_handler(
+            func=lambda message: getattr(message, "text", None)
+            == VIEW_CONTENT_PLAN_BUTTON_TEXT
+        )
+        def handle_content_plan_view(message: Any) -> None:
+            chat_id = self._message_chat_id(message)
+            if list_callback is None:
+                self._send_control_message(chat_id, "Просмотр контент-плана не настроен.")
+                return
+            self._send_control_message(
+                chat_id,
+                self._format_content_plan_items(list_callback()),
+                reply_markup=self._manual_publish_keyboard(),
+            )
+
+        @self.bot.message_handler(
+            func=lambda message: getattr(message, "text", None)
+            == CREATE_CONTENT_PLAN_BUTTON_TEXT
+        )
+        def handle_content_plan_compose(message: Any) -> None:
+            chat_id = self._message_chat_id(message)
+            chat_key = self._chat_key(chat_id)
             self._content_plan_dialogs[chat_key] = {"awaiting_description": True}
             self._send_control_message(
                 chat_id,
@@ -217,57 +398,65 @@ class TelegramPublisher:
             func=lambda message: self._is_content_plan_dialog_message(message)
         )
         def handle_content_plan_dialog(message: Any) -> None:
-            chat_id = self._message_chat_id(message)
-            chat_key = self._chat_key(chat_id)
-            state = self._content_plan_dialogs.get(chat_key, {})
-            text = getattr(message, "text", "") or ""
+            self._handle_content_plan_dialog_message(message, generate_callback, approve_callback)
 
-            if text in {MENU_BUTTON_TEXT, CANCEL_BUTTON_TEXT}:
-                self._content_plan_dialogs.pop(chat_key, None)
-                self._send_main_menu(
-                    chat_id,
-                    "Диалог контент-плана отменен. Выберите действие в меню.",
-                )
-                return
+    def _handle_content_plan_dialog_message(
+        self,
+        message: Any,
+        generate_callback: Callable[[str], ContentPlan],
+        approve_callback: Callable[[ContentPlan], Any],
+    ) -> None:
+        chat_id = self._message_chat_id(message)
+        chat_key = self._chat_key(chat_id)
+        state = self._content_plan_dialogs.get(chat_key, {})
+        text = getattr(message, "text", "") or ""
 
-            if text == BACK_BUTTON_TEXT:
-                state.clear()
-                state["awaiting_description"] = True
-                self._send_control_message(
-                    chat_id,
-                    "Вернулись на шаг описания. Отправьте новый контент-план в свободном формате или нажмите «Отмена».",
-                    reply_markup=self._content_plan_description_keyboard(),
-                )
-                return
+        if text in {MENU_BUTTON_TEXT, CANCEL_BUTTON_TEXT}:
+            self._content_plan_dialogs.pop(chat_key, None)
+            self._send_main_menu(
+                chat_id,
+                "Диалог контент-плана отменен. Выберите действие в меню.",
+            )
+            return
 
-            if state.get("awaiting_description"):
-                state["description"] = text
-                state["awaiting_description"] = False
-                self._generate_and_send_content_plan(chat_id, state, generate_callback)
-                return
+        if text == BACK_BUTTON_TEXT:
+            state.clear()
+            state["awaiting_description"] = True
+            self._send_control_message(
+                chat_id,
+                "Вернулись на шаг описания. Отправьте новый контент-план в свободном формате или нажмите «Отмена».",
+                reply_markup=self._content_plan_description_keyboard(),
+            )
+            return
 
-            if text == REGENERATE_CONTENT_PLAN_BUTTON_TEXT:
-                self._generate_and_send_content_plan(chat_id, state, generate_callback)
-                return
-
-            if text == APPROVE_CONTENT_PLAN_BUTTON_TEXT:
-                plan = state.get("plan")
-                if not isinstance(plan, ContentPlan):
-                    self._send_control_message(
-                        chat_id, "Сначала нужно сгенерировать контент план."
-                    )
-                    return
-                approve_callback(plan)
-                self._content_plan_dialogs.pop(chat_key, None)
-                self._send_control_message(
-                    chat_id,
-                    "✅ Контент план согласован и сохранен. Посты будут опубликованы по расписанию.",
-                    reply_markup=self._manual_publish_keyboard(),
-                )
-                return
-
-            state.setdefault("dialog_context", []).append(f"Пользователь: {text}")
+        if state.get("awaiting_description"):
+            state["description"] = text
+            state["awaiting_description"] = False
             self._generate_and_send_content_plan(chat_id, state, generate_callback)
+            return
+
+        if text == REGENERATE_CONTENT_PLAN_BUTTON_TEXT:
+            self._generate_and_send_content_plan(chat_id, state, generate_callback)
+            return
+
+        if text == APPROVE_CONTENT_PLAN_BUTTON_TEXT:
+            plan = state.get("plan")
+            if not isinstance(plan, ContentPlan):
+                self._send_control_message(
+                    chat_id, "Сначала нужно сгенерировать контент план."
+                )
+                return
+            approve_callback(plan)
+            self._content_plan_dialogs.pop(chat_key, None)
+            self._send_control_message(
+                chat_id,
+                "✅ Контент план согласован и сохранен. Посты будут опубликованы по расписанию.",
+                reply_markup=self._manual_publish_keyboard(),
+            )
+            return
+
+        state.setdefault("dialog_context", []).append(f"Пользователь: {text}")
+        self._generate_and_send_content_plan(chat_id, state, generate_callback)
 
     def _is_content_plan_dialog_message(self, message: Any) -> bool:
         if self._message_text(message) in MAIN_MENU_BUTTON_TEXTS:
@@ -424,6 +613,59 @@ class TelegramPublisher:
             types.KeyboardButton(CANCEL_BUTTON_TEXT),
         )
         return keyboard
+
+    def _send_manual_post_draft(
+        self, chat_id: int | str, draft: ManualPublicationDraft
+    ) -> int:
+        image_state = "есть" if draft.image is not None else "нет"
+        text = (
+            f"📰 Черновик новости: {draft.post.title}\n"
+            f"Источник: {draft.post.source_url}\n"
+            f"Картинка: {image_state}\n\n"
+            f"{draft.post.text}"
+        )
+        return self._send_control_message(
+            chat_id, text, reply_markup=self._manual_post_approval_keyboard()
+        )
+
+    @staticmethod
+    def _manual_post_approval_keyboard() -> types.ReplyKeyboardMarkup:
+        keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        keyboard.add(
+            types.KeyboardButton(APPROVE_MANUAL_POST_BUTTON_TEXT),
+            types.KeyboardButton(REJECT_MANUAL_POST_BUTTON_TEXT),
+        )
+        keyboard.add(
+            types.KeyboardButton(REGENERATE_MANUAL_TEXT_BUTTON_TEXT),
+            types.KeyboardButton(REGENERATE_MANUAL_IMAGE_BUTTON_TEXT),
+        )
+        keyboard.add(types.KeyboardButton(MENU_BUTTON_TEXT))
+        return keyboard
+
+    @staticmethod
+    def _content_plan_menu_keyboard() -> types.ReplyKeyboardMarkup:
+        keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        keyboard.add(
+            types.KeyboardButton(VIEW_CONTENT_PLAN_BUTTON_TEXT),
+            types.KeyboardButton(CREATE_CONTENT_PLAN_BUTTON_TEXT),
+        )
+        keyboard.add(types.KeyboardButton(MENU_BUTTON_TEXT))
+        return keyboard
+
+    @staticmethod
+    def _format_content_plan_items(items: list[tuple[int, ContentPlanItem]]) -> str:
+        if not items:
+            return "Контент-план пуст: запланированных публикаций нет."
+        lines = ["🗓️ Запланированные публикации:", ""]
+        for item_id, item in items:
+            lines.append(
+                f"#{item_id} {item.scheduled_at.isoformat()} — {item.title} ({item.status.value})"
+            )
+            lines.append(item.text)
+            if item.image_prompt:
+                lines.append(f"Картинка: {item.image_prompt}")
+            lines.append("")
+        return "\n".join(lines).strip()
 
     @staticmethod
     def _format_content_plan(plan: ContentPlan) -> str:
