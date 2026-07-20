@@ -133,6 +133,19 @@ def test_find_fresh_news_uses_openrouter_web_search_tool() -> None:
     assert "using web search" in payload["messages"][1]["content"]
 
 
+def test_find_fresh_news_preserves_online_model_suffix() -> None:
+    content = json.dumps({"news": []})
+    http_client = FakeHTTPClient([content])
+    client = AIClient(
+        settings=make_settings(openrouter_model="openai/gpt-4.1-mini:online"),
+        http_client=http_client,
+    )
+
+    assert client.find_fresh_news() == []
+
+    assert http_client.requests[0]["json"]["model"] == "openai/gpt-4.1-mini:online"
+
+
 def test_generate_post_does_not_use_web_search_tool() -> None:
     content = json.dumps(
         {
@@ -318,7 +331,7 @@ def test_find_fresh_news_stores_status_and_body_on_http_status_failure() -> None
     assert client.last_error_message == "OpenRouter request failed with HTTP 403 Forbidden: model access denied"
 
 
-def test_chat_requests_strip_legacy_online_model_suffix() -> None:
+def test_chat_requests_preserve_online_model_suffix() -> None:
     content = json.dumps(
         {
             "title": "AI release",
@@ -341,7 +354,7 @@ def test_chat_requests_strip_legacy_online_model_suffix() -> None:
 
     client.generate_post(news)
 
-    assert http_client.requests[0]["json"]["model"] == "openai/gpt-4.1-mini"
+    assert http_client.requests[0]["json"]["model"] == "openai/gpt-4.1-mini:online"
 
 
 def test_find_fresh_news_retries_with_json_object_when_json_schema_request_fails() -> None:
@@ -353,6 +366,7 @@ def test_find_fresh_news_retries_with_json_object_when_json_schema_request_fails
                     "source_url": "https://example.com/new-model",
                     "source_name": "Example",
                     "summary": "A newer model became available.",
+                    "published_at": "2026-07-16T10:00:00Z",
                 }
             ]
         }

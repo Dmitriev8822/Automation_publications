@@ -456,27 +456,15 @@ class AIClient:
             raise OpenRouterRequestError(self._format_request_error(exc)) from exc
 
     def _chat_model_name(self) -> str:
-        """Return the model name used for Chat Completions requests.
+        """Return the configured model name for Chat Completions requests.
 
-        OpenRouter web search is configured through the dedicated ``tools`` field in
-        this client. Some user configs still append the legacy/provider suffix
-        ``:online`` to the model name, which can be rejected with HTTP 403 for
-        ordinary chat-completion requests such as content-plan generation.
-        Stripping the suffix keeps generation on the selected base model while
-        ``find_fresh_news()`` still gets web access through ``openrouter:web_search``.
+        OpenRouter supports model suffixes such as ``:online`` for models that
+        should use online/search-grounded behavior. The client must preserve the
+        configured suffix instead of normalizing it away, otherwise a news lookup
+        can silently fall back to the ordinary offline model.
         """
 
-        model = self.settings.openrouter_model.strip()
-        if model.endswith(":online"):
-            normalized = model.removesuffix(":online")
-            logger.warning(
-                "OPENROUTER_MODEL=%s uses ':online'; using base chat model %s. "
-                "Web search is controlled by OPENROUTER_ENABLE_WEB_SEARCH.",
-                model,
-                normalized,
-            )
-            return normalized
-        return model
+        return self.settings.openrouter_model.strip()
 
     @staticmethod
     def _format_request_error(exc: Exception) -> str:
