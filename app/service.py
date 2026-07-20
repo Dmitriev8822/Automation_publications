@@ -109,6 +109,7 @@ def create_manual_publication_draft(
     post = ai_client.generate_post(news)
     _notify(progress_callback, "🖼️ Проверяю/генерирую изображение...")
     image = ai_client.generate_image(post)
+    _notify_image_result(progress_callback, ai_client, image)
     _notify(progress_callback, "👀 Черновик готов и ожидает согласования.")
     return ManualPublicationDraft(news=news, post=post, image=image)
 
@@ -199,6 +200,7 @@ def create_and_publish_post(
         _notify(progress_callback, "🖼️ Проверяю/генерирую изображение...")
         logger.info("Generating image for source: %s", source_url)
         image = ai_client.generate_image(generated_post)
+        _notify_image_result(progress_callback, ai_client, image)
 
         _notify(progress_callback, "📨 Публикую пост в Telegram...")
         logger.info("Publishing post to Telegram for source: %s", source_url)
@@ -244,6 +246,21 @@ def _mark_failed(
         repository.mark_failed(source_url, error_message)
     except Exception:
         logger.exception("Could not mark post as failed for source: %s", source_url)
+
+
+def _notify_image_result(
+    progress_callback: ProgressCallback | None,
+    ai_client: AIClientProtocol,
+    image: ImageAsset | None,
+) -> None:
+    if image is not None:
+        _notify(progress_callback, "✅ Изображение готово.")
+        return
+    image_error = getattr(ai_client, "last_image_error_message", None)
+    if image_error:
+        _notify(progress_callback, f"⚠️ Изображение не сгенерировано: {image_error}")
+    else:
+        _notify(progress_callback, "ℹ️ Изображение не сгенерировано, публикую без картинки.")
 
 
 def _notify(progress_callback: ProgressCallback | None, message: str) -> None:

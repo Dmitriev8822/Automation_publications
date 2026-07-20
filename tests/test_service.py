@@ -32,9 +32,13 @@ class FakeAIClient:
         fail_post: bool = False,
         fail_image: bool = False,
         last_error_message: str | None = None,
+        last_image_error_message: str | None = None,
+        skip_image: bool = False,
     ) -> None:
         self.news = news
         self.last_error_message = last_error_message
+        self.last_image_error_message = last_image_error_message
+        self.skip_image = skip_image
         self.fail_post = fail_post
         self.fail_image = fail_image
         self.generated_posts: list[News] = []
@@ -55,6 +59,8 @@ class FakeAIClient:
         self.image_posts.append(post)
         if self.fail_image:
             raise RuntimeError("image generation failed")
+        if self.skip_image:
+            return None
         return ImageAsset(data=b"image")
 
 
@@ -145,9 +151,29 @@ def test_successful_scenario_reports_progress() -> None:
         "✍️ Генерирую текст поста через OpenRouter...",
         "💾 Сохраняю сгенерированный пост в БД...",
         "🖼️ Проверяю/генерирую изображение...",
+        "✅ Изображение готово.",
         "📨 Публикую пост в Telegram...",
         "✅ Пост опубликован. Telegram message_id=777",
     ]
+
+
+
+def test_reports_when_image_generation_returns_none() -> None:
+    progress_messages: list[str] = []
+
+    result = create_and_publish_post(
+        FakeAIClient(
+            [make_news()],
+            skip_image=True,
+            last_image_error_message="ENABLE_IMAGE_GENERATION=false",
+        ),
+        FakeTelegramPublisher(),
+        FakeRepository(),
+        progress_callback=progress_messages.append,
+    )
+
+    assert result is not None
+    assert "⚠️ Изображение не сгенерировано: ENABLE_IMAGE_GENERATION=false" in progress_messages
 
 
 def test_skips_already_published_news() -> None:

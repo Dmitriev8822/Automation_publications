@@ -84,6 +84,7 @@ class AIClient:
     ) -> None:
         self.settings = settings or get_settings()
         self.last_error_message: str | None = None
+        self.last_image_error_message: str | None = None
         if http_client is not None:
             self.http_client = http_client
         else:
@@ -238,7 +239,9 @@ class AIClient:
     def generate_image(self, post: GeneratedPost) -> ImageAsset | None:
         """Generate an image asset through OpenRouter's dedicated Image API."""
 
+        self.last_image_error_message = None
         if not self.settings.enable_image_generation:
+            self.last_image_error_message = "ENABLE_IMAGE_GENERATION=false"
             logger.info("Image generation is disabled by ENABLE_IMAGE_GENERATION=false")
             return None
 
@@ -257,6 +260,7 @@ class AIClient:
             ) from exc
 
         if not image_response.data:
+            self.last_image_error_message = "OpenRouter Image API returned no image data"
             logger.warning(
                 "OpenRouter Image API returned no image data for source_url=%s",
                 post.source_url,
@@ -266,6 +270,7 @@ class AIClient:
         item = image_response.data[0]
         image_data = self._decode_image_data(item.b64_json)
         if image_data is None and item.url is None:
+            self.last_image_error_message = "OpenRouter Image API returned an empty image item"
             logger.warning(
                 "OpenRouter Image API returned an empty image item for source_url=%s",
                 post.source_url,
