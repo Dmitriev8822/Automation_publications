@@ -80,6 +80,25 @@ REMINDER_APPROVAL_BUTTON_TEXTS = {
 
 logger = logging.getLogger(__name__)
 
+START_INSTRUCTION_TEXT = (
+    "Готов публиковать новости и работать с контент-планом.\n\n"
+    "Как пользоваться ботом:\n"
+    f"• {MANUAL_PUBLISH_BUTTON_TEXT} — подготовить новость, посмотреть черновик, "
+    "принять, отменить или перегенерировать текст/картинку.\n"
+    f"• {CONTENT_PLAN_BUTTON_TEXT} — посмотреть запланированные публикации или "
+    "составить новый контент-план по свободному описанию.\n"
+    f"• {REMINDERS_BUTTON_TEXT} — настроить, за сколько минут до публикации "
+    "присылать пост на одобрение.\n"
+    "• /menu — вернуться к этому меню в любой момент."
+)
+
+LEGACY_START_INSTRUCTION_TEXT = (
+    "Готов публиковать новости.\n\n"
+    "Как пользоваться ботом:\n"
+    f"• Нажмите {MANUAL_PUBLISH_BUTTON_TEXT}, чтобы запустить ручную публикацию.\n"
+    "• /menu — показать меню команд, если оно доступно в вашем клиенте Telegram."
+)
+
 
 class TelegramBotProtocol(Protocol):
     """Subset of pyTelegramBotAPI methods used by the publisher."""
@@ -189,7 +208,7 @@ class TelegramPublisher:
             def handle_start(message: Any) -> None:
                 self._send_control_message(
                     self._message_chat_id(message),
-                    "Готов публиковать новости. Нажмите кнопку ниже, чтобы запустить публикацию вручную.",
+                    LEGACY_START_INSTRUCTION_TEXT,
                     reply_markup=self._manual_publish_keyboard(),
                 )
 
@@ -229,7 +248,7 @@ class TelegramPublisher:
         def handle_start(message: Any) -> None:
             self._send_main_menu(
                 self._message_chat_id(message),
-                "Готов публиковать новости и работать с контент-планом. Выберите действие в меню.",
+                START_INSTRUCTION_TEXT,
             )
 
         @self.bot.message_handler(
