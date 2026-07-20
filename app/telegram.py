@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import urllib.request
 from contextlib import nullcontext
 from collections.abc import Callable
 from io import BytesIO
@@ -41,6 +42,7 @@ REJECT_REMINDER_BUTTON_TEXT = "❌ Не выкладывать"
 REGENERATE_REMINDER_TEXT_BUTTON_TEXT = "✍️ Перегенерировать текст"
 REGENERATE_REMINDER_IMAGE_BUTTON_TEXT = "🖼️ Перегенерировать картинку"
 TELEGRAM_UNAUTHORIZED_CODE = 401
+TELEGRAM_PHOTO_CAPTION_MAX_LENGTH = 1024
 
 MAIN_MENU_BUTTON_TEXTS = {
     MANUAL_PUBLISH_BUTTON_TEXT,
@@ -105,6 +107,7 @@ class TelegramPublisher:
         self,
         settings: Settings | None = None,
         bot: TelegramBotProtocol | None = None,
+        image_url_fetcher: Callable[[str], tuple[bytes, str | None]] | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self.channel_id = self._require_setting(
@@ -116,6 +119,7 @@ class TelegramPublisher:
             "TELEGRAM_BOT_TOKEN is required to publish to Telegram",
         )
         self.bot = bot or telebot.TeleBot(token)
+        self._image_url_fetcher = image_url_fetcher or self._fetch_image_url
         self._content_plan_dialogs: dict[int | str, dict[str, Any]] = {}
         self._manual_post_dialogs: dict[int | str, ManualPublicationDraft] = {}
         self._reminder_dialogs: dict[int | str, dict[str, Any]] = {}
@@ -143,11 +147,7 @@ class TelegramPublisher:
                 try:
                     photo_context = self._photo_payload(image)
                     with photo_context as photo:
-                        message = self.bot.send_photo(
-                            chat_id=self.channel_id,
-                            photo=photo,
-                            caption=post.text,
-                        )
+                        message = self._send_photo_post(post.text, photo)
                 except Exception as exc:
                     if not self._is_image_process_failed(exc):
                         raise
@@ -826,19 +826,58 @@ class TelegramPublisher:
             and "IMAGE_PROCESS_FAILED" in description
         )
 
-    @staticmethod
-    def _photo_payload(image: ImageAsset):
-        if image.data is not None:
-            payload = BytesIO(image.data)
-            payload.name = (
-                "telegram-image"  # pyTelegramBotAPI uses it as multipart filename.
+    def _send_photo_post(self, text: str, photo: Any) -> Any:
+        if len(text) <= TELEGRAM_PHOTO_CAPTION_MAX_LENGTH:
+            return self.bot.send_photo(
+                chat_id=self.channel_id,
+                photo=photo,
+                caption=text,
             )
-            return nullcontext(payload)
+
+        caption = text[: TELEGRAM_PHOTO_CAPTION_MAX_LENGTH - 1].rstrip() + "…"
+        photo_message = self.bot.send_photo(
+            chat_id=self.channel_id,
+            photo=photo,
+            caption=caption,
+        )
+        self.bot.send_message(chat_id=self.channel_id, text=text)
+        return photo_message
+
+    def _photo_payload(self, image: ImageAsset):
+        if image.data is not None:
+            return nullcontext(self._bytes_photo_payload(image.data, image.mime_type))
         if image.file_path is not None:
             return Path(image.file_path).open("rb")
         if image.url is not None:
-            return nullcontext(str(image.url))
+            image_data, mime_type = self._image_url_fetcher(str(image.url))
+            return nullcontext(
+                self._bytes_photo_payload(image_data, mime_type or image.mime_type)
+            )
         raise ValueError("ImageAsset must contain data, url, or file_path")
+
+    @staticmethod
+    def _bytes_photo_payload(image_data: bytes, mime_type: str) -> BytesIO:
+        payload = BytesIO(image_data)
+        payload.name = (
+            f"telegram-image{TelegramPublisher._extension_for_mime_type(mime_type)}"
+        )
+        return payload
+
+    @staticmethod
+    def _fetch_image_url(url: str) -> tuple[bytes, str | None]:
+        with urllib.request.urlopen(url, timeout=30) as response:
+            content_type = response.headers.get("Content-Type")
+            return response.read(), content_type
+
+    @staticmethod
+    def _extension_for_mime_type(mime_type: str) -> str:
+        normalized = (mime_type or "").split(";", maxsplit=1)[0].strip().lower()
+        return {
+            "image/jpeg": ".jpg",
+            "image/jpg": ".jpg",
+            "image/png": ".png",
+            "image/webp": ".webp",
+        }.get(normalized, ".jpg")
 
     @staticmethod
     def _manual_publish_keyboard() -> types.ReplyKeyboardMarkup:
