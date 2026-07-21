@@ -127,9 +127,9 @@ Unit-тесты должны передавать fake-объекты вмест
 
 Для сценария напоминаний добавлены функции:
 
-- `approve_content_plan_item_publication(item_id, telegram_publisher, content_plan_repository, ai_client=None)` — подтверждает, что конкретный пункт остается в расписании после одобрения пользователя; немедленной публикации и смены статуса не выполняет;
+- `approve_content_plan_item_publication(item_id, telegram_publisher, content_plan_repository, ai_client=None)` — после одобрения пользователя сразу публикует конкретный пункт в Telegram, при наличии `ai_client` генерирует изображение по `image_prompt`, помечает пункт как `published`, а при ошибке сохраняет `failed` и пробрасывает исключение;
 - `reject_content_plan_item_publication(item_id, content_plan_repository, reason=None)` — отменяет пункт после отказа пользователя;
 - `regenerate_content_plan_item_text(item_id, ai_client, content_plan_repository, instruction="")` — просит AI обновить текст и сохраняет результат;
 - `regenerate_content_plan_item_image(item_id, ai_client, content_plan_repository, instruction="")` — просит AI обновить prompt картинки и сохраняет результат.
 
-Так `service.py` остается единственным местом бизнес-процесса публикации и управляет связкой AI → изображение → Telegram → статус в БД.
+Так `service.py` остается единственным местом бизнес-процесса публикации и управляет связкой AI → изображение → Telegram → статус в БД. После успешного одобрения статус становится `published`, поэтому запланированный ранее date-job не выполнит повторную публикацию этого же пункта.

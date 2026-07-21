@@ -8,6 +8,7 @@ from typing import Protocol
 
 from app.schemas import (
     ContentPlanItem,
+    ContentPlanItemStatus,
     GeneratedPost,
     ImageAsset,
     ManualPublicationDraft,
@@ -317,15 +318,38 @@ def approve_content_plan_item_publication(
     content_plan_repository: ContentPlanRepositoryProtocol,
     ai_client: AIClientProtocol | None = None,
 ) -> ContentPlanItem:
-    """Keep one content-plan item scheduled after user approval.
+    """Immediately publish one content-plan item after user approval.
 
-    Pre-publication approval is a confirmation that the item should continue to
-    follow its original schedule. Publication still happens only when the
-    scheduler later calls :func:`publish_due_content_plan_items`.
+    A reminder approval is an explicit user decision to publish the prepared
+    post. The item is sent to Telegram right away and marked as published, so a
+    later scheduler date-job will skip it because it is no longer scheduled.
     """
 
-    _ = telegram_publisher, ai_client
-    return content_plan_repository.get_item(item_id)
+    item = content_plan_repository.get_item(item_id)
+    if item.status != ContentPlanItemStatus.SCHEDULED:
+        raise RuntimeError(
+            f"Content-plan item {item_id} cannot be published from status {item.status.value}"
+        )
+
+    generated_post = GeneratedPost(
+        title=item.title,
+        text=item.text,
+        image_prompt=item.image_prompt,
+        source_url=item.source_url or f"https://content-plan.local/items/{item_id}",
+    )
+    try:
+        image = (
+            ai_client.generate_image(generated_post)
+            if ai_client is not None and item.image_prompt
+            else None
+        )
+        message_id = telegram_publisher.publish_post(generated_post, image)
+        return content_plan_repository.mark_item_published(item_id, message_id)
+    except Exception as exc:
+        content_plan_repository.mark_item_failed(
+            item_id, str(exc) or exc.__class__.__name__
+        )
+        raise
 
 
 def reject_content_plan_item_publication(

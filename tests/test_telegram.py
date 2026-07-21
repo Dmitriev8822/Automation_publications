@@ -452,7 +452,7 @@ def test_menu_buttons_interrupt_active_dialogs_without_cross_handling() -> None:
     assert content_plan_calls == [("план на неделю", [])]
 
 
-def test_reminders_dialog_saves_minutes_and_approval_handler_confirms_schedule() -> None:
+def test_reminders_dialog_saves_minutes_and_approval_handler_confirms_publication() -> None:
     bot = FakeBot()
     publisher = TelegramPublisher(settings=make_settings(), bot=bot)
     configured: list[tuple[int | None, int | str]] = []
@@ -481,7 +481,7 @@ def test_reminders_dialog_saves_minutes_and_approval_handler_confirms_schedule()
     assert publisher.reminder_chat_id == 777
     assert configured == [(15, 777)]
     assert approved == [42]
-    assert "по ранее согласованному плану" in bot.sent_messages[-1]["text"]
+    assert bot.sent_messages[-1]["text"] == "✅ Пост одобрен и опубликован в канале."
 
 
 def test_reminders_dialog_can_disable_persistent_reminders() -> None:
