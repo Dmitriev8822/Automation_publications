@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -595,6 +596,31 @@ def test_publication_approval_handler_matches_persisted_string_chat_id() -> None
 from app.telegram import BACK_BUTTON_TEXT, CANCEL_BUTTON_TEXT, MENU_BUTTON_TEXT
 
 
+def _keyboard_texts(reply_markup) -> list[str]:
+    payload = json.loads(reply_markup.to_json())
+    return [button["text"] for row in payload["keyboard"] for button in row]
+
+
+def test_dialog_keyboards_show_back_button_instead_of_cancel() -> None:
+    bot = FakeBot()
+    publisher = TelegramPublisher(settings=make_settings(), bot=bot)
+
+    keyboards = [
+        publisher._manual_post_approval_keyboard(),
+        publisher._content_plan_view_keyboard(),
+        publisher._content_plan_approval_keyboard(),
+        publisher._content_plan_description_keyboard(),
+        publisher._reminder_approval_keyboard(),
+        publisher._reminders_settings_keyboard(),
+        publisher._reminders_custom_keyboard(),
+    ]
+
+    for keyboard in keyboards:
+        texts = _keyboard_texts(keyboard)
+        assert BACK_BUTTON_TEXT in texts
+        assert CANCEL_BUTTON_TEXT not in texts
+
+
 def test_content_plan_dialog_back_returns_to_description_step() -> None:
     bot = FakeBot()
     publisher = TelegramPublisher(settings=make_settings(), bot=bot)
@@ -616,7 +642,7 @@ def test_content_plan_dialog_back_returns_to_description_step() -> None:
     assert "Вернулись на шаг описания" in bot.sent_messages[-3]["text"]
 
 
-def test_content_plan_dialog_cancel_returns_main_menu_without_approval() -> None:
+def test_content_plan_dialog_back_returns_main_menu_without_approval() -> None:
     bot = FakeBot()
     publisher = TelegramPublisher(settings=make_settings(), bot=bot)
     approved: list[ContentPlan] = []
@@ -626,14 +652,14 @@ def test_content_plan_dialog_cancel_returns_main_menu_without_approval() -> None
     )
 
     dispatch_text(bot, 555, CONTENT_PLAN_BUTTON_TEXT)
-    dispatch_text(bot, 555, CANCEL_BUTTON_TEXT)
+    dispatch_text(bot, 555, BACK_BUTTON_TEXT)
 
     assert approved == []
-    assert "Диалог контент-плана отменен" in bot.sent_messages[-1]["text"]
+    assert "Диалог контент-плана закрыт" in bot.sent_messages[-1]["text"]
     assert bot.sent_messages[-1]["reply_markup"] is not None
 
 
-def test_reminders_dialog_cancel_returns_main_menu_without_saving() -> None:
+def test_reminders_dialog_back_returns_main_menu_without_saving() -> None:
     bot = FakeBot()
     publisher = TelegramPublisher(settings=make_settings(), bot=bot)
     configured: list[tuple[int | None, int | str]] = []
@@ -643,7 +669,7 @@ def test_reminders_dialog_cancel_returns_main_menu_without_saving() -> None:
     )
 
     dispatch_text(bot, 777, REMINDERS_BUTTON_TEXT)
-    dispatch_text(bot, 777, MENU_BUTTON_TEXT)
+    dispatch_text(bot, 777, BACK_BUTTON_TEXT)
 
     assert configured == []
     assert publisher.reminder_minutes_before is None
@@ -651,7 +677,7 @@ def test_reminders_dialog_cancel_returns_main_menu_without_saving() -> None:
     assert bot.sent_messages[-1]["reply_markup"] is not None
 
 
-def test_publication_approval_cancel_closes_pending_item_without_callback() -> None:
+def test_publication_approval_back_closes_pending_item_without_callback() -> None:
     bot = FakeBot()
     publisher = TelegramPublisher(settings=make_settings(), bot=bot)
     approved: list[int] = []
@@ -665,7 +691,7 @@ def test_publication_approval_cancel_closes_pending_item_without_callback() -> N
     )
 
     publisher.send_publication_reminder(777, 42, make_plan().items[0])
-    dispatch_text(bot, 777, CANCEL_BUTTON_TEXT)
+    dispatch_text(bot, 777, BACK_BUTTON_TEXT)
     dispatch_text(bot, 777, APPROVE_REMINDER_BUTTON_TEXT)
 
     assert approved == []
