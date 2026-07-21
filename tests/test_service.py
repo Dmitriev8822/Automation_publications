@@ -294,12 +294,24 @@ def test_publish_due_content_plan_items_publishes_due_items() -> None:
     assert publisher.published[0][0].title == "Plan post"
 
 
-def test_approve_content_plan_item_publication_keeps_item_scheduled() -> None:
+def test_approve_content_plan_item_publication_publishes_immediately() -> None:
     repo = FakeContentPlanRepository()
     publisher = FakeTelegramPublisher()
 
     result = approve_content_plan_item_publication(5, publisher, repo)
 
-    assert result.status is ContentPlanItemStatus.SCHEDULED
-    assert publisher.published == []
+    assert result.status is ContentPlanItemStatus.PUBLISHED
+    assert result.telegram_message_id == 777
+    assert publisher.published[0][0].title == "Plan post"
+    assert repo.published == [(5, 777)]
+
+
+def test_approve_content_plan_item_publication_marks_failed_on_error() -> None:
+    repo = FakeContentPlanRepository()
+    publisher = FakeTelegramPublisher(fail=True)
+
+    with pytest.raises(RuntimeError, match="telegram failed"):
+        approve_content_plan_item_publication(5, publisher, repo)
+
+    assert repo.failed == [(5, "telegram failed")]
     assert repo.published == []
