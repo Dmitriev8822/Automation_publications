@@ -442,7 +442,8 @@ def test_menu_buttons_interrupt_active_dialogs_without_cross_handling() -> None:
 
     assert content_plan_calls == []
     assert reminder_settings == [(15, 555)]
-    assert "За сколько минут" in bot.sent_messages[-2]["text"]
+    assert "сейчас напоминания отключены" in bot.sent_messages[-2]["text"]
+    assert "переустановить таймер" in bot.sent_messages[-2]["text"]
     assert "Напомню за 15 минут" in bot.sent_messages[-1]["text"]
 
     dispatch_text(bot, 555, REMINDERS_BUTTON_TEXT)
@@ -452,7 +453,9 @@ def test_menu_buttons_interrupt_active_dialogs_without_cross_handling() -> None:
     assert content_plan_calls == [("план на неделю", [])]
 
 
-def test_reminders_dialog_saves_minutes_and_approval_handler_confirms_publication() -> None:
+def test_reminders_dialog_saves_minutes_and_approval_handler_confirms_publication() -> (
+    None
+):
     bot = FakeBot()
     publisher = TelegramPublisher(settings=make_settings(), bot=bot)
     configured: list[tuple[int | None, int | str]] = []
@@ -482,6 +485,31 @@ def test_reminders_dialog_saves_minutes_and_approval_handler_confirms_publicatio
     assert configured == [(15, 777)]
     assert approved == [42]
     assert bot.sent_messages[-1]["text"] == "✅ Пост одобрен и опубликован в канале."
+
+
+def test_reminders_dialog_supports_preset_and_custom_minutes() -> None:
+    bot = FakeBot()
+    publisher = TelegramPublisher(settings=make_settings(), bot=bot)
+    configured: list[tuple[int | None, int | str]] = []
+
+    publisher.reminder_minutes_before = 30
+    publisher.register_reminders_handler(
+        lambda minutes, chat_id: configured.append((minutes, chat_id))
+    )
+
+    dispatch_text(bot, 777, REMINDERS_BUTTON_TEXT)
+    assert "сейчас стоит таймер за 30 минут" in bot.sent_messages[-1]["text"]
+    dispatch_text(bot, 777, "За 1 час")
+    assert publisher.reminder_minutes_before == 60
+    assert configured == [(60, 777)]
+
+    dispatch_text(bot, 777, REMINDERS_BUTTON_TEXT)
+    dispatch_text(bot, 777, "другое")
+    dispatch_text(bot, 777, "45")
+
+    assert publisher.reminder_minutes_before == 45
+    assert configured == [(60, 777), (45, 777)]
+    assert "Напомню за 45 минут" in bot.sent_messages[-1]["text"]
 
 
 def test_reminders_dialog_can_disable_persistent_reminders() -> None:
@@ -531,7 +559,9 @@ def test_content_plan_publication_reminder_sends_image_preview() -> None:
     publisher = TelegramPublisher(settings=make_settings(), bot=bot)
     image = ImageAsset(data=b"image-bytes", mime_type="image/png")
 
-    message_id = publisher.send_publication_reminder(777, 42, make_plan().items[0], image)
+    message_id = publisher.send_publication_reminder(
+        777, 42, make_plan().items[0], image
+    )
 
     assert message_id == 202
     assert bot.sent_photos
@@ -643,6 +673,7 @@ def test_publication_approval_cancel_closes_pending_item_without_callback() -> N
     assert "Решение по напоминанию закрыто" in bot.sent_messages[-2]["text"]
     assert bot.sent_messages[-1]["text"] == "Нет поста, ожидающего решения."
 
+
 from app.schemas import News, ManualPublicationDraft
 from app.telegram import (
     APPROVE_MANUAL_POST_BUTTON_TEXT,
@@ -677,14 +708,21 @@ def test_manual_publication_approval_flow_prepares_regenerates_and_approves() ->
     publisher.register_manual_publish_handler(
         lambda progress: make_manual_draft(),
         approved.append,
-        lambda draft: regenerated.append(make_manual_draft("Новый текст")) or regenerated[-1],
+        lambda draft: regenerated.append(make_manual_draft("Новый текст"))
+        or regenerated[-1],
         lambda draft: draft,
     )
 
     chat = SimpleNamespace(chat=SimpleNamespace(id=555))
-    bot.handlers[1]["func"](SimpleNamespace(chat=chat.chat, text=MANUAL_PUBLISH_BUTTON_TEXT))
-    bot.handlers[3]["func"](SimpleNamespace(chat=chat.chat, text=REGENERATE_MANUAL_TEXT_BUTTON_TEXT))
-    bot.handlers[3]["func"](SimpleNamespace(chat=chat.chat, text=APPROVE_MANUAL_POST_BUTTON_TEXT))
+    bot.handlers[1]["func"](
+        SimpleNamespace(chat=chat.chat, text=MANUAL_PUBLISH_BUTTON_TEXT)
+    )
+    bot.handlers[3]["func"](
+        SimpleNamespace(chat=chat.chat, text=REGENERATE_MANUAL_TEXT_BUTTON_TEXT)
+    )
+    bot.handlers[3]["func"](
+        SimpleNamespace(chat=chat.chat, text=APPROVE_MANUAL_POST_BUTTON_TEXT)
+    )
 
     assert "Черновик новости" in bot.sent_photos[0]["caption"]
     assert bot.sent_photos[0]["photo"].getvalue() == b"img"
