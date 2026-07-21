@@ -289,10 +289,10 @@ def build_runtime(settings: Settings) -> ApplicationRuntime:
             lambda item_id: reject_content_plan_item_publication(
                 item_id, content_plan_repository
             ),
-            lambda item_id: regenerate_content_plan_item_text(
+            lambda item_id: _regenerate_content_plan_item_text_preview(
                 item_id, ai_client, content_plan_repository
             ),
-            lambda item_id: regenerate_content_plan_item_image(
+            lambda item_id: _regenerate_content_plan_item_image_preview(
                 item_id, ai_client, content_plan_repository
             ),
         )
@@ -327,6 +327,28 @@ def _generate_content_plan_item_preview_image(
             exc_info=True,
         )
         return None
+
+
+def _regenerate_content_plan_item_text_preview(
+    item_id: int, ai_client: AIClient, content_plan_repository: ContentPlanRepository
+) -> tuple[ContentPlanItem, ImageAsset | None]:
+    """Regenerate text and return a fresh image preview for the reminder chat."""
+
+    item = regenerate_content_plan_item_text(
+        item_id, ai_client, content_plan_repository
+    )
+    return item, _generate_content_plan_item_preview_image(item_id, item, ai_client)
+
+
+def _regenerate_content_plan_item_image_preview(
+    item_id: int, ai_client: AIClient, content_plan_repository: ContentPlanRepository
+) -> tuple[ContentPlanItem, ImageAsset | None]:
+    """Regenerate image prompt and return a fresh image preview for the reminder chat."""
+
+    item = regenerate_content_plan_item_image(
+        item_id, ai_client, content_plan_repository
+    )
+    return item, _generate_content_plan_item_preview_image(item_id, item, ai_client)
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
