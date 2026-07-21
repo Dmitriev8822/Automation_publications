@@ -1131,7 +1131,7 @@ class TelegramPublisher:
                     self._pending_reminder_items.pop(chat_key, None)
                     self._send_control_message(
                         chat_id,
-                        "✅ Пост одобрен и опубликован в канале.",
+                        "✅ Пост одобрен. Он будет опубликован по расписанию.",
                         reply_markup=self._manual_publish_keyboard(),
                     )
                 elif text == REJECT_REMINDER_BUTTON_TEXT:

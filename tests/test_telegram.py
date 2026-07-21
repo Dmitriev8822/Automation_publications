@@ -492,7 +492,7 @@ def test_reminders_dialog_saves_minutes_and_approval_handler_confirms_publicatio
     assert publisher.reminder_chat_id == 777
     assert configured == [(15, 777)]
     assert approved == [42]
-    assert bot.sent_messages[-1]["text"] == "✅ Пост одобрен и опубликован в канале."
+    assert bot.sent_messages[-1]["text"] == "✅ Пост одобрен. Он будет опубликован по расписанию."
 
 
 def test_reminders_dialog_supports_preset_and_custom_minutes() -> None:

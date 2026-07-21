@@ -127,8 +127,8 @@ Unit-тесты должны передавать fake-объекты вмест
 
 Для сценария напоминаний добавлены функции:
 
-- `approve_content_plan_item_publication(item_id, telegram_publisher, content_plan_repository, ai_client=None)` — после одобрения пользователя сразу публикует конкретный пункт в Telegram, при наличии `ai_client` генерирует изображение по `image_prompt`, помечает пункт как `published`, а при ошибке сохраняет `failed` и пробрасывает исключение;
-- `reject_content_plan_item_publication(item_id, content_plan_repository, reason=None)` — отменяет пункт после отказа пользователя;
+- `approve_content_plan_item_publication(item_id, telegram_publisher, content_plan_repository, ai_client=None)` — после одобрения пользователя не публикует пункт сразу: одобрение означает только отсутствие отказа, поэтому пункт остается в статусе `scheduled` и будет опубликован date-job в `scheduled_at`; если пользователь не ответит на напоминание, поведение такое же;
+- `reject_content_plan_item_publication(item_id, content_plan_repository, reason=None)` — отменяет пункт только после явного отказа пользователя и только пока пункт еще `scheduled`;
 - `regenerate_content_plan_item_text(item_id, ai_client, content_plan_repository, instruction="")` — просит AI обновить текст по свободной инструкции пользователя из Telegram и сохраняет результат;
 - `regenerate_content_plan_item_image(item_id, ai_client, content_plan_repository, instruction="")` — просит AI обновить prompt картинки и сохраняет результат;
 - `reject_content_plan_publication(plan_id, content_plan_repository, reason=None)` — отменяет все scheduled-пункты выбранного плана;

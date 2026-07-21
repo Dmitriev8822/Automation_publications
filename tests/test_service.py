@@ -255,7 +255,11 @@ def test_reports_ai_fetch_error_when_news_list_is_empty() -> None:
         "ℹ️ Свежих неопубликованных новостей не найдено.",
     ]
 
-from app.service import approve_content_plan_item_publication, publish_due_content_plan_items
+from app.service import (
+    approve_content_plan_item_publication,
+    publish_due_content_plan_items,
+    reject_content_plan_item_publication,
+)
 from app.schemas import ContentPlanItem, ContentPlanItemStatus
 from datetime import datetime, timezone
 
@@ -265,6 +269,7 @@ class FakeContentPlanRepository:
         self.items = [(5, ContentPlanItem(scheduled_at=datetime.now(timezone.utc), title="Plan post", text="Text", image_prompt=""))]
         self.published: list[tuple[int, int]] = []
         self.failed: list[tuple[int, str]] = []
+        self.cancelled: list[tuple[int, str | None]] = []
 
     def get_due_items(self):
         return self.items
@@ -281,6 +286,10 @@ class FakeContentPlanRepository:
         self.failed.append((item_id, error_message))
         return self.items[0][1].model_copy(update={"status": ContentPlanItemStatus.FAILED, "error_message": error_message})
 
+    def mark_item_cancelled(self, item_id: int, error_message: str | None = None) -> ContentPlanItem:
+        self.cancelled.append((item_id, error_message))
+        return self.items[0][1].model_copy(update={"status": ContentPlanItemStatus.CANCELLED, "error_message": error_message})
+
 
 def test_publish_due_content_plan_items_publishes_due_items() -> None:
     repo = FakeContentPlanRepository()
@@ -294,24 +303,29 @@ def test_publish_due_content_plan_items_publishes_due_items() -> None:
     assert publisher.published[0][0].title == "Plan post"
 
 
-def test_approve_content_plan_item_publication_publishes_immediately() -> None:
+def test_approve_content_plan_item_publication_keeps_item_scheduled_until_timer() -> None:
     repo = FakeContentPlanRepository()
     publisher = FakeTelegramPublisher()
 
     result = approve_content_plan_item_publication(5, publisher, repo)
 
-    assert result.status is ContentPlanItemStatus.PUBLISHED
-    assert result.telegram_message_id == 777
-    assert publisher.published[0][0].title == "Plan post"
-    assert repo.published == [(5, 777)]
-
-
-def test_approve_content_plan_item_publication_marks_failed_on_error() -> None:
-    repo = FakeContentPlanRepository()
-    publisher = FakeTelegramPublisher(fail=True)
-
-    with pytest.raises(RuntimeError, match="telegram failed"):
-        approve_content_plan_item_publication(5, publisher, repo)
-
-    assert repo.failed == [(5, "telegram failed")]
+    assert result.status is ContentPlanItemStatus.SCHEDULED
+    assert publisher.published == []
     assert repo.published == []
+    assert repo.failed == []
+
+
+def test_reject_content_plan_item_publication_cancels_only_scheduled_items() -> None:
+    repo = FakeContentPlanRepository()
+
+    result = reject_content_plan_item_publication(5, repo)
+
+    assert result.status is ContentPlanItemStatus.CANCELLED
+    assert repo.cancelled == [(5, "User rejected publication")]
+
+    repo.items[0] = (5, repo.items[0][1].model_copy(update={"status": ContentPlanItemStatus.PUBLISHED}))
+
+    result = reject_content_plan_item_publication(5, repo)
+
+    assert result.status is ContentPlanItemStatus.PUBLISHED
+    assert repo.cancelled == [(5, "User rejected publication")]
