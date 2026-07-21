@@ -776,3 +776,61 @@ def test_content_plan_menu_can_view_existing_items_and_start_compose() -> None:
     assert "Выберите действие" in bot.sent_messages[0]["text"]
     assert "#7" in bot.sent_messages[1]["text"]
     assert calls == [("план на неделю", [])]
+
+
+from app.telegram import EDIT_CONTENT_PLAN_BUTTON_TEXT, DELETE_CONTENT_PLAN_BUTTON_TEXT
+
+
+def test_content_plan_view_can_delete_existing_item() -> None:
+    bot = FakeBot()
+    publisher = TelegramPublisher(settings=make_settings(), bot=bot)
+    deleted: list[int] = []
+
+    publisher.register_content_plan_handler(
+        lambda description, context=None: make_plan(),
+        lambda plan: None,
+        lambda: [(7, make_plan().items[0])],
+        deleted.append,
+        lambda item_id, instruction: make_plan().items[0],
+    )
+
+    dispatch_text(bot, 555, CONTENT_PLAN_BUTTON_TEXT)
+    dispatch_text(bot, 555, VIEW_CONTENT_PLAN_BUTTON_TEXT)
+    dispatch_text(bot, 555, DELETE_CONTENT_PLAN_BUTTON_TEXT)
+    dispatch_text(bot, 555, "#7")
+
+    assert deleted == [7]
+    assert "Пункт КП #7 удален" in bot.sent_messages[-1]["text"]
+
+
+def test_content_plan_view_can_edit_existing_item_with_ai_instruction() -> None:
+    bot = FakeBot()
+    publisher = TelegramPublisher(settings=make_settings(), bot=bot)
+    edits: list[tuple[int, str]] = []
+    updated = (
+        make_plan()
+        .items[0]
+        .model_copy(update={"title": "Обновленный пост", "text": "Новый текст"})
+    )
+
+    def edit(item_id: int, instruction: str) -> ContentPlanItem:
+        edits.append((item_id, instruction))
+        return updated
+
+    publisher.register_content_plan_handler(
+        lambda description, context=None: make_plan(),
+        lambda plan: None,
+        lambda: [(7, make_plan().items[0])],
+        lambda item_id: None,
+        edit,
+    )
+
+    dispatch_text(bot, 555, CONTENT_PLAN_BUTTON_TEXT)
+    dispatch_text(bot, 555, VIEW_CONTENT_PLAN_BUTTON_TEXT)
+    dispatch_text(bot, 555, EDIT_CONTENT_PLAN_BUTTON_TEXT)
+    dispatch_text(bot, 555, "7")
+    dispatch_text(bot, 555, "сделай текст короче и добавь акцент на пользу")
+
+    assert edits == [(7, "сделай текст короче и добавь акцент на пользу")]
+    assert "Пункт КП #7 обновлен через ИИ" in bot.sent_messages[-1]["text"]
+    assert "Обновленный пост" in bot.sent_messages[-1]["text"]

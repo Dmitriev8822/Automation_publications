@@ -41,7 +41,12 @@ from app.service import (
     regenerate_manual_publication_text,
     reject_content_plan_item_publication,
 )
-from app.schemas import ContentPlanItem, ContentPlanItemStatus, GeneratedPost, ImageAsset
+from app.schemas import (
+    ContentPlanItem,
+    ContentPlanItemStatus,
+    GeneratedPost,
+    ImageAsset,
+)
 from app.telegram import TelegramPublisher
 
 logger = logging.getLogger(__name__)
@@ -177,11 +182,38 @@ def build_runtime(settings: Settings) -> ApplicationRuntime:
     list_scheduled_items = getattr(
         content_plan_repository, "list_scheduled_items", lambda: []
     )
+
+    def delete_content_plan_item(item_id: int) -> ContentPlanItem:
+        item = reject_content_plan_item_publication(
+            item_id, content_plan_repository, "User deleted item from content-plan view"
+        )
+        add_content_plan_item_jobs(
+            scheduler,
+            scheduled_content_plan_job,
+            content_plan_repository.get_scheduled_item_slots(),
+        )
+        schedule_persistent_reminders()
+        return item
+
+    def edit_content_plan_item(item_id: int, instruction: str) -> ContentPlanItem:
+        item = regenerate_content_plan_item_text(
+            item_id, ai_client, content_plan_repository, instruction
+        )
+        add_content_plan_item_jobs(
+            scheduler,
+            scheduled_content_plan_job,
+            content_plan_repository.get_scheduled_item_slots(),
+        )
+        schedule_persistent_reminders()
+        return item
+
     try:
         telegram_publisher.register_content_plan_handler(
             ai_client.generate_content_plan,
             save_content_plan_and_schedule,
             list_scheduled_items,
+            delete_content_plan_item,
+            edit_content_plan_item,
         )
     except TypeError:
         logger.warning(
