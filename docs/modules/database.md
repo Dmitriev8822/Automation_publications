@@ -10,6 +10,7 @@
 - `SessionLocal` — фабрика сессий SQLAlchemy для работы приложения.
 - `Base` — базовый класс декларативных SQLAlchemy-моделей.
 - `PostRecord` — ORM-модель таблицы `posts`.
+- `ReminderSettingsRecord` — ORM-модель таблицы `reminder_settings` с постоянной настройкой напоминаний.
 - `init_db() -> None` — создаёт каталог для файловой SQLite-БД и таблицы, если они ещё не существуют.
 - `PostRepository` — репозиторий для бизнес-логики без прямого доступа к SQLAlchemy.
   - `is_published(source_url: str) -> bool` — возвращает `True`, если URL уже имеет статус `published`.
@@ -17,6 +18,10 @@
   - `mark_published(source_url: str, telegram_message_id: int) -> PublishedPost` — переводит пост в статус `published` и сохраняет Telegram message id.
   - `mark_failed(source_url: str, error_message: str) -> PublishedPost` — переводит пост в статус `failed` и сохраняет текст ошибки.
   - `get_by_source_url(source_url: str) -> PublishedPost | None` — возвращает сохранённый пост по URL или `None`.
+- `ReminderSettingsRepository` — репозиторий постоянной настройки напоминаний.
+  - `get_settings() -> tuple[bool, int | None, int | str | None]` — возвращает флаг включения, минуты до публикации и чат для уведомлений.
+  - `enable(minutes_before: int, chat_id: int | str) -> None` — включает напоминания для всех запланированных публикаций.
+  - `disable() -> None` — отключает напоминания, сохраняя последний чат.
 
 ## Используемые настройки
 
@@ -104,7 +109,23 @@ if not repository.is_published(str(post.source_url)):
 - `save_plan(plan: ContentPlan) -> int` — сохраняет согласованный план и возвращает id.
 - `get_due_items(now: datetime | None = None) -> list[tuple[int, ContentPlanItem]]` — возвращает пункты со статусом `scheduled`, время которых уже наступило.
 - `get_scheduled_item_slots() -> list[tuple[int, datetime]]` — возвращает id и `scheduled_at` всех еще запланированных пунктов, чтобы scheduler мог поставить отдельный `date`-job на каждый пункт.
+- `list_scheduled_items() -> list[tuple[int, ContentPlanItem]]` — возвращает запланированные пункты для команды `Посмотреть КП` в Telegram-меню.
 - `mark_item_published(item_id: int, telegram_message_id: int) -> ContentPlanItem` — фиксирует успешную публикацию пункта.
 - `mark_item_failed(item_id: int, error_message: str) -> ContentPlanItem` — фиксирует ошибку публикации пункта.
 
 Пункты плана имеют статусы `scheduled`, `published`, `failed`. `init_db()` создает таблицы контент-планов вместе с таблицей публикаций.
+
+## Отмена и редактирование пунктов контент-плана
+
+Для предпубликационного согласования добавлен статус `cancelled`: пункт не будет опубликован после отказа пользователя.
+
+`ContentPlanRepository` дополнительно предоставляет методы:
+
+- `get_item(item_id: int) -> ContentPlanItem` — загрузить один пункт для напоминания или ручного действия;
+- `update_item_content(item_id: int, item: ContentPlanItem) -> ContentPlanItem` — сохранить обновленные AI заголовок, текст и `image_prompt`;
+- `mark_item_cancelled(item_id: int, error_message: str | None = None) -> ContentPlanItem` — отменить публикацию пункта.
+
+
+## Хранение настроек напоминаний
+
+Постоянная настройка меню `⏰ Напоминания` хранится в таблице `reminder_settings`. `ReminderSettingsRepository` возвращает выключенное состояние, если запись еще не создана; при включении сохраняет количество минут до публикации и `chat_id`, а при отключении сбрасывает минуты и флаг `enabled`. Эта настройка не привязана к конкретному контент-плану, поэтому `app.main` может применять ее ко всем старым и новым пунктам со статусом `scheduled`.

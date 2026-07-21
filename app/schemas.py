@@ -4,7 +4,14 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from pydantic import AnyUrl, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AnyUrl,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 
 class PostStatus(str, Enum):
@@ -15,14 +22,13 @@ class PostStatus(str, Enum):
     FAILED = "failed"
 
 
-
-
 class ContentPlanItemStatus(str, Enum):
     """Lifecycle statuses for scheduled content-plan items."""
 
     SCHEDULED = "scheduled"
     PUBLISHED = "published"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class ContentPlanItem(BaseModel):
@@ -57,8 +63,11 @@ class ContentPlan(BaseModel):
     @model_validator(mode="after")
     def validate_period(self) -> "ContentPlan":
         if self.period_end < self.period_start:
-            raise ValueError("ContentPlan period_end must be greater than or equal to period_start")
+            raise ValueError(
+                "ContentPlan period_end must be greater than or equal to period_start"
+            )
         return self
+
 
 class News(BaseModel):
     """News item selected as a source for a Telegram publication."""
@@ -101,6 +110,14 @@ class ImageAsset(BaseModel):
         if self.data is None and self.url is None and self.file_path is None:
             raise ValueError("ImageAsset must contain data, url, or file_path")
         return self
+
+
+class ManualPublicationDraft(BaseModel):
+    """Generated news post waiting for user approval before Telegram publication."""
+
+    news: News
+    post: GeneratedPost
+    image: ImageAsset | None = None
 
 
 class PublishedPost(BaseModel):

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from collections.abc import Callable
 from typing import Any
 
@@ -12,7 +12,9 @@ from apscheduler.schedulers.background import BackgroundScheduler
 logger = logging.getLogger(__name__)
 
 
-def create_scheduler(job_func: Callable[[], Any], interval_minutes: int) -> BackgroundScheduler:
+def create_scheduler(
+    job_func: Callable[[], Any], interval_minutes: int
+) -> BackgroundScheduler:
     """Create a background scheduler with one protected interval job.
 
     Exceptions raised by ``job_func`` are logged and swallowed so a single
@@ -33,7 +35,10 @@ def create_scheduler(job_func: Callable[[], Any], interval_minutes: int) -> Back
         coalesce=True,
         next_run_time=datetime.now(timezone.utc),
     )
-    logger.info("Scheduled publication job registered: id=publish_post interval_minutes=%s", interval_minutes)
+    logger.info(
+        "Scheduled publication job registered: id=publish_post interval_minutes=%s",
+        interval_minutes,
+    )
     return scheduler
 
 
@@ -52,7 +57,9 @@ def add_content_plan_item_jobs(
         run_at = _ensure_timezone(scheduled_at)
         job_id = f"content_plan_item_{item_id}"
         scheduler.add_job(
-            _protected_job(job_func, f"Content-plan publication job failed: item_id={item_id}"),
+            _protected_job(
+                job_func, f"Content-plan publication job failed: item_id={item_id}"
+            ),
             trigger="date",
             run_date=run_at,
             id=job_id,
@@ -62,7 +69,52 @@ def add_content_plan_item_jobs(
             coalesce=True,
             misfire_grace_time=None,
         )
-        logger.info("Scheduled content-plan item job: id=%s run_date=%s", job_id, run_at.isoformat())
+        logger.info(
+            "Scheduled content-plan item job: id=%s run_date=%s",
+            job_id,
+            run_at.isoformat(),
+        )
+
+
+def add_content_plan_reminder_jobs(
+    scheduler: BackgroundScheduler,
+    job_func: Callable[[int], Any],
+    scheduled_items: list[tuple[int, datetime]],
+    minutes_before: int,
+) -> None:
+    """Register reminder jobs before scheduled content-plan publication times."""
+
+    for item_id, scheduled_at in scheduled_items:
+        run_at = _ensure_timezone(scheduled_at) - timedelta(minutes=minutes_before)
+        job_id = f"content_plan_reminder_{item_id}"
+        scheduler.add_job(
+            _protected_job(
+                lambda item_id=item_id: job_func(item_id),
+                f"Content-plan reminder job failed: item_id={item_id}",
+            ),
+            trigger="date",
+            run_date=run_at,
+            id=job_id,
+            name=f"Remind content-plan item {item_id}",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=None,
+        )
+        logger.info(
+            "Scheduled content-plan reminder job: id=%s run_date=%s",
+            job_id,
+            run_at.isoformat(),
+        )
+
+
+def remove_content_plan_reminder_jobs(scheduler: BackgroundScheduler) -> None:
+    """Remove all registered content-plan reminder jobs."""
+
+    for job in list(scheduler.get_jobs()):
+        if job.id.startswith("content_plan_reminder_"):
+            scheduler.remove_job(job.id)
+            logger.info("Removed content-plan reminder job: id=%s", job.id)
 
 
 def create_content_plan_scheduler(
@@ -77,7 +129,9 @@ def create_content_plan_scheduler(
     return scheduler
 
 
-def _protected_job(job_func: Callable[[], Any], error_message: str) -> Callable[[], None]:
+def _protected_job(
+    job_func: Callable[[], Any], error_message: str
+) -> Callable[[], None]:
     def protected_job() -> None:
         logger.info("Scheduled publication job started")
         try:

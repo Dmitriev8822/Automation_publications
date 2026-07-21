@@ -32,9 +32,13 @@ class FakeAIClient:
         fail_post: bool = False,
         fail_image: bool = False,
         last_error_message: str | None = None,
+        last_image_error_message: str | None = None,
+        skip_image: bool = False,
     ) -> None:
         self.news = news
         self.last_error_message = last_error_message
+        self.last_image_error_message = last_image_error_message
+        self.skip_image = skip_image
         self.fail_post = fail_post
         self.fail_image = fail_image
         self.generated_posts: list[News] = []
@@ -55,6 +59,8 @@ class FakeAIClient:
         self.image_posts.append(post)
         if self.fail_image:
             raise RuntimeError("image generation failed")
+        if self.skip_image:
+            return None
         return ImageAsset(data=b"image")
 
 
@@ -145,9 +151,29 @@ def test_successful_scenario_reports_progress() -> None:
         "✍️ Генерирую текст поста через OpenRouter...",
         "💾 Сохраняю сгенерированный пост в БД...",
         "🖼️ Проверяю/генерирую изображение...",
+        "✅ Изображение готово.",
         "📨 Публикую пост в Telegram...",
         "✅ Пост опубликован. Telegram message_id=777",
     ]
+
+
+
+def test_reports_when_image_generation_returns_none() -> None:
+    progress_messages: list[str] = []
+
+    result = create_and_publish_post(
+        FakeAIClient(
+            [make_news()],
+            skip_image=True,
+            last_image_error_message="ENABLE_IMAGE_GENERATION=false",
+        ),
+        FakeTelegramPublisher(),
+        FakeRepository(),
+        progress_callback=progress_messages.append,
+    )
+
+    assert result is not None
+    assert "⚠️ Изображение не сгенерировано: ENABLE_IMAGE_GENERATION=false" in progress_messages
 
 
 def test_skips_already_published_news() -> None:
@@ -229,7 +255,7 @@ def test_reports_ai_fetch_error_when_news_list_is_empty() -> None:
         "ℹ️ Свежих неопубликованных новостей не найдено.",
     ]
 
-from app.service import publish_due_content_plan_items
+from app.service import approve_content_plan_item_publication, publish_due_content_plan_items
 from app.schemas import ContentPlanItem, ContentPlanItemStatus
 from datetime import datetime, timezone
 
@@ -242,6 +268,10 @@ class FakeContentPlanRepository:
 
     def get_due_items(self):
         return self.items
+
+    def get_item(self, item_id: int) -> ContentPlanItem:
+        assert item_id == self.items[0][0]
+        return self.items[0][1]
 
     def mark_item_published(self, item_id: int, telegram_message_id: int) -> ContentPlanItem:
         self.published.append((item_id, telegram_message_id))
@@ -262,3 +292,26 @@ def test_publish_due_content_plan_items_publishes_due_items() -> None:
     assert result[0].status is ContentPlanItemStatus.PUBLISHED
     assert repo.published == [(5, 777)]
     assert publisher.published[0][0].title == "Plan post"
+
+
+def test_approve_content_plan_item_publication_publishes_immediately() -> None:
+    repo = FakeContentPlanRepository()
+    publisher = FakeTelegramPublisher()
+
+    result = approve_content_plan_item_publication(5, publisher, repo)
+
+    assert result.status is ContentPlanItemStatus.PUBLISHED
+    assert result.telegram_message_id == 777
+    assert publisher.published[0][0].title == "Plan post"
+    assert repo.published == [(5, 777)]
+
+
+def test_approve_content_plan_item_publication_marks_failed_on_error() -> None:
+    repo = FakeContentPlanRepository()
+    publisher = FakeTelegramPublisher(fail=True)
+
+    with pytest.raises(RuntimeError, match="telegram failed"):
+        approve_content_plan_item_publication(5, publisher, repo)
+
+    assert repo.failed == [(5, "telegram failed")]
+    assert repo.published == []

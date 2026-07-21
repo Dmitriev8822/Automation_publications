@@ -97,6 +97,18 @@ Unit-тесты должны передавать fake-объекты вмест
 
 См. описание выше в этом документе.
 
+
+## Ручное согласование новости
+
+Для схемы ручной публикации добавлены функции:
+
+- `create_manual_publication_draft(ai_client, repository, progress_callback=None) -> ManualPublicationDraft | None` — ищет первую неопубликованную новость, генерирует текст и изображение, но не сохраняет и не публикует черновик до решения пользователя;
+- `publish_manual_publication_draft(draft, telegram_publisher, repository) -> PublishedPost` — после кнопки `Принять` сохраняет `generated`, публикует в Telegram и переводит запись в `published`;
+- `regenerate_manual_publication_text(draft, ai_client) -> ManualPublicationDraft` — заново генерирует текст и картинку для того же источника;
+- `regenerate_manual_publication_image(draft, ai_client) -> ManualPublicationDraft` — заново генерирует только изображение для текущего текста.
+
+Так ручная публикация соответствует пользовательской схеме: подготовка → согласование → принять/отменить/перегенерировать текст и изображение/перегенерировать картинку отдельно. Legacy-функция `create_and_publish_post()` сохранена для совместимости и автоматического сценария без интерактивного согласования.
+
 ## Выполнение контент-плана
 
 `publish_due_content_plan_items(telegram_publisher, content_plan_repository) -> list[ContentPlanItem]` публикует все пункты согласованных контент-планов, у которых наступил `scheduled_at` и статус остается `scheduled`.
@@ -108,3 +120,16 @@ Unit-тесты должны передавать fake-объекты вмест
 3. Опубликовать пост через `telegram_publisher.publish_post(post, None)`.
 4. При успехе вызвать `mark_item_published(item_id, message_id)`.
 5. При ошибке вызвать `mark_item_failed(item_id, error_message)` и продолжить обработку следующих пунктов, чтобы scheduler не остановился.
+
+## Предпубликационное согласование пунктов контент-плана
+
+`publish_due_content_plan_items(telegram_publisher, content_plan_repository, ai_client=None)` теперь может получать `ai_client`: если он передан, перед публикацией пункта контент-плана генерируется картинка по `image_prompt`, и в Telegram уходит пост вместе с изображением.
+
+Для сценария напоминаний добавлены функции:
+
+- `approve_content_plan_item_publication(item_id, telegram_publisher, content_plan_repository, ai_client=None)` — после одобрения пользователя сразу публикует конкретный пункт в Telegram, при наличии `ai_client` генерирует изображение по `image_prompt`, помечает пункт как `published`, а при ошибке сохраняет `failed` и пробрасывает исключение;
+- `reject_content_plan_item_publication(item_id, content_plan_repository, reason=None)` — отменяет пункт после отказа пользователя;
+- `regenerate_content_plan_item_text(item_id, ai_client, content_plan_repository, instruction="")` — просит AI обновить текст и сохраняет результат;
+- `regenerate_content_plan_item_image(item_id, ai_client, content_plan_repository, instruction="")` — просит AI обновить prompt картинки и сохраняет результат.
+
+Так `service.py` остается единственным местом бизнес-процесса публикации и управляет связкой AI → изображение → Telegram → статус в БД. После успешного одобрения статус становится `published`, поэтому запланированный ранее date-job не выполнит повторную публикацию этого же пункта.
