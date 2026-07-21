@@ -442,6 +442,78 @@ class ContentPlanRepository:
             ).all()
             return [(record.id, self._item_to_schema(record)) for record in records]
 
+    def list_scheduled_plans(self) -> list[tuple[int, ContentPlan]]:
+        """Return plans that still contain scheduled items for menu preview."""
+
+        with self._session_factory() as session:
+            records = session.scalars(
+                select(ContentPlanRecord)
+                .join(ContentPlanRecord.items)
+                .where(
+                    ContentPlanItemRecord.status
+                    == ContentPlanItemStatus.SCHEDULED.value
+                )
+                .order_by(ContentPlanRecord.created_at)
+                .distinct()
+            ).all()
+            return [(record.id, self._plan_to_schema(record)) for record in records]
+
+    def get_plan(self, plan_id: int) -> ContentPlan:
+        """Load one content plan by id."""
+
+        with self._session_factory() as session:
+            return self._plan_to_schema(self._require_plan(session, plan_id))
+
+    def mark_plan_cancelled(
+        self, plan_id: int, error_message: str | None = None
+    ) -> list[ContentPlanItem]:
+        """Cancel all scheduled items of one content plan."""
+
+        with self._session_factory() as session:
+            plan = self._require_plan(session, plan_id)
+            cancelled: list[ContentPlanItemRecord] = []
+            for record in plan.items:
+                if record.status != ContentPlanItemStatus.SCHEDULED.value:
+                    continue
+                record.status = ContentPlanItemStatus.CANCELLED.value
+                record.error_message = error_message
+                record.updated_at = _utc_now()
+                cancelled.append(record)
+            session.commit()
+            for record in cancelled:
+                session.refresh(record)
+            return [self._item_to_schema(record) for record in cancelled]
+
+    def replace_plan(self, plan_id: int, plan: ContentPlan) -> tuple[int, ContentPlan]:
+        """Replace editable plan fields and scheduled items with an AI-updated plan."""
+
+        with self._session_factory() as session:
+            record = self._require_plan(session, plan_id)
+            record.title = plan.title
+            record.raw_request = plan.raw_request
+            record.period_start = _to_app_timezone_naive(
+                plan.period_start, self._app_timezone
+            )
+            record.period_end = _to_app_timezone_naive(
+                plan.period_end, self._app_timezone
+            )
+            record.items = [
+                ContentPlanItemRecord(
+                    scheduled_at=_to_app_timezone_naive(
+                        item.scheduled_at, self._app_timezone
+                    ),
+                    title=item.title,
+                    text=item.text,
+                    image_prompt=item.image_prompt,
+                    source_url=str(item.source_url) if item.source_url else None,
+                    status=item.status.value,
+                )
+                for item in plan.items
+            ]
+            session.commit()
+            session.refresh(record)
+            return record.id, self._plan_to_schema(record)
+
     def mark_item_published(
         self, item_id: int, telegram_message_id: int
     ) -> ContentPlanItem:
@@ -499,6 +571,24 @@ class ContentPlanRepository:
             session.commit()
             session.refresh(record)
             return self._item_to_schema(record)
+
+    @staticmethod
+    def _require_plan(session: Session, plan_id: int) -> ContentPlanRecord:
+        record = session.get(ContentPlanRecord, plan_id)
+        if record is None:
+            raise LookupError(f"Content plan with id '{plan_id}' was not found")
+        return record
+
+    def _plan_to_schema(self, record: ContentPlanRecord) -> ContentPlan:
+        return ContentPlan(
+            title=record.title,
+            period_start=_from_app_timezone_naive(
+                record.period_start, self._app_timezone
+            ),
+            period_end=_from_app_timezone_naive(record.period_end, self._app_timezone),
+            items=[self._item_to_schema(item) for item in record.items],
+            raw_request=record.raw_request,
+        )
 
     @staticmethod
     def _require_item(session: Session, item_id: int) -> ContentPlanItemRecord:

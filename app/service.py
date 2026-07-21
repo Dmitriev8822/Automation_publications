@@ -7,6 +7,7 @@ from collections.abc import Callable
 from typing import Protocol
 
 from app.schemas import (
+    ContentPlan,
     ContentPlanItem,
     ContentPlanItemStatus,
     GeneratedPost,
@@ -29,6 +30,10 @@ class AIClientProtocol(Protocol):
     def generate_post(self, news: News) -> GeneratedPost: ...
 
     def generate_image(self, post: GeneratedPost) -> ImageAsset | None: ...
+
+    def regenerate_content_plan(
+        self, plan: "ContentPlan", instruction: str = ""
+    ) -> "ContentPlan": ...
 
     def regenerate_content_plan_item_text(
         self, item: ContentPlanItem, instruction: str = ""
@@ -79,6 +84,16 @@ class ContentPlanRepositoryProtocol(Protocol):
     def update_item_content(
         self, item_id: int, item: ContentPlanItem
     ) -> ContentPlanItem: ...
+
+    def get_plan(self, plan_id: int) -> ContentPlan: ...
+
+    def mark_plan_cancelled(
+        self, plan_id: int, error_message: str | None = None
+    ) -> list[ContentPlanItem]: ...
+
+    def replace_plan(
+        self, plan_id: int, plan: ContentPlan
+    ) -> tuple[int, ContentPlan]: ...
 
 
 def create_manual_publication_draft(
@@ -261,7 +276,9 @@ def _notify_image_result(
     if image_error:
         _notify(progress_callback, f"⚠️ Изображение не сгенерировано: {image_error}")
     else:
-        _notify(progress_callback, "ℹ️ Изображение не сгенерировано, публикую без картинки.")
+        _notify(
+            progress_callback, "ℹ️ Изображение не сгенерировано, публикую без картинки."
+        )
 
 
 def _notify(progress_callback: ProgressCallback | None, message: str) -> None:
@@ -388,3 +405,28 @@ def regenerate_content_plan_item_image(
     item = content_plan_repository.get_item(item_id)
     regenerated = ai_client.regenerate_content_plan_item_image_prompt(item, instruction)
     return content_plan_repository.update_item_content(item_id, regenerated)
+
+
+def reject_content_plan_publication(
+    plan_id: int,
+    content_plan_repository: ContentPlanRepositoryProtocol,
+    reason: str | None = None,
+) -> list[ContentPlanItem]:
+    """Cancel all scheduled items of one content plan after user deletion."""
+
+    return content_plan_repository.mark_plan_cancelled(
+        plan_id, reason or "User deleted content plan"
+    )
+
+
+def regenerate_content_plan(
+    plan_id: int,
+    ai_client: AIClientProtocol,
+    content_plan_repository: ContentPlanRepositoryProtocol,
+    instruction: str = "",
+) -> tuple[int, ContentPlan]:
+    """Regenerate and persist a whole content plan using a user instruction."""
+
+    plan = content_plan_repository.get_plan(plan_id)
+    regenerated = ai_client.regenerate_content_plan(plan, instruction)
+    return content_plan_repository.replace_plan(plan_id, regenerated)
