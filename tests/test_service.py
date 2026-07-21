@@ -255,27 +255,61 @@ def test_reports_ai_fetch_error_when_news_list_is_empty() -> None:
         "ℹ️ Свежих неопубликованных новостей не найдено.",
     ]
 
-from app.service import publish_due_content_plan_items
+from app.service import approve_content_plan_item_publication, publish_due_content_plan_items
 from app.schemas import ContentPlanItem, ContentPlanItemStatus
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 
 class FakeContentPlanRepository:
-    def __init__(self) -> None:
-        self.items = [(5, ContentPlanItem(scheduled_at=datetime.now(timezone.utc), title="Plan post", text="Text", image_prompt=""))]
+    def __init__(self, scheduled_at: datetime | None = None) -> None:
+        self.items = [
+            (
+                5,
+                ContentPlanItem(
+                    scheduled_at=scheduled_at or datetime.now(timezone.utc),
+                    title="Plan post",
+                    text="Text",
+                    image_prompt="",
+                ),
+            )
+        ]
         self.published: list[tuple[int, int]] = []
         self.failed: list[tuple[int, str]] = []
 
     def get_due_items(self):
-        return self.items
+        now = datetime.now(timezone.utc)
+        return [
+            (item_id, item)
+            for item_id, item in self.items
+            if item.status is ContentPlanItemStatus.SCHEDULED
+            and item.scheduled_at <= now
+        ]
+
+    def get_item(self, item_id: int) -> ContentPlanItem:
+        assert item_id == self.items[0][0]
+        return self.items[0][1]
 
     def mark_item_published(self, item_id: int, telegram_message_id: int) -> ContentPlanItem:
         self.published.append((item_id, telegram_message_id))
-        return self.items[0][1].model_copy(update={"status": ContentPlanItemStatus.PUBLISHED, "telegram_message_id": telegram_message_id})
+        published_item = self.items[0][1].model_copy(
+            update={
+                "status": ContentPlanItemStatus.PUBLISHED,
+                "telegram_message_id": telegram_message_id,
+            }
+        )
+        self.items[0] = (item_id, published_item)
+        return published_item
 
     def mark_item_failed(self, item_id: int, error_message: str) -> ContentPlanItem:
         self.failed.append((item_id, error_message))
-        return self.items[0][1].model_copy(update={"status": ContentPlanItemStatus.FAILED, "error_message": error_message})
+        failed_item = self.items[0][1].model_copy(
+            update={
+                "status": ContentPlanItemStatus.FAILED,
+                "error_message": error_message,
+            }
+        )
+        self.items[0] = (item_id, failed_item)
+        return failed_item
 
 
 def test_publish_due_content_plan_items_publishes_due_items() -> None:
@@ -288,3 +322,29 @@ def test_publish_due_content_plan_items_publishes_due_items() -> None:
     assert result[0].status is ContentPlanItemStatus.PUBLISHED
     assert repo.published == [(5, 777)]
     assert publisher.published[0][0].title == "Plan post"
+
+
+def test_approve_content_plan_item_publication_keeps_future_item_scheduled() -> None:
+    repo = FakeContentPlanRepository(
+        scheduled_at=datetime.now(timezone.utc) + timedelta(minutes=10)
+    )
+    publisher = FakeTelegramPublisher()
+
+    result = approve_content_plan_item_publication(5, publisher, repo)
+
+    assert result.status is ContentPlanItemStatus.SCHEDULED
+    assert publisher.published == []
+    assert repo.published == []
+
+
+def test_approve_content_plan_item_publication_publishes_due_item() -> None:
+    repo = FakeContentPlanRepository(
+        scheduled_at=datetime.now(timezone.utc) - timedelta(minutes=1)
+    )
+    publisher = FakeTelegramPublisher()
+
+    result = approve_content_plan_item_publication(5, publisher, repo)
+
+    assert result.status is ContentPlanItemStatus.PUBLISHED
+    assert publisher.published[0][0].title == "Plan post"
+    assert repo.published == [(5, 777)]

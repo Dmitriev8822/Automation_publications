@@ -8,6 +8,7 @@ from typing import Protocol
 
 from app.schemas import (
     ContentPlanItem,
+    ContentPlanItemStatus,
     GeneratedPost,
     ImageAsset,
     ManualPublicationDraft,
@@ -317,18 +318,22 @@ def approve_content_plan_item_publication(
     content_plan_repository: ContentPlanRepositoryProtocol,
     ai_client: AIClientProtocol | None = None,
 ) -> ContentPlanItem:
-    """Publish one content-plan item immediately after user approval."""
+    """Publish only if the approved item is already due by the agreed plan.
+
+    Approval must not bypass the original content-plan time. If that time is
+    still in the future, the item remains scheduled. If the scheduled time has
+    already arrived, publication goes through the same due-item flow as the
+    scheduler instead of a separate immediate path.
+    """
 
     item = content_plan_repository.get_item(item_id)
-    generated_post = GeneratedPost(
-        title=item.title,
-        text=item.text,
-        image_prompt=item.image_prompt,
-        source_url=item.source_url or f"https://content-plan.local/items/{item_id}",
+    if item.status != ContentPlanItemStatus.SCHEDULED:
+        return item
+
+    publish_due_content_plan_items(
+        telegram_publisher, content_plan_repository, ai_client
     )
-    image = ai_client.generate_image(generated_post) if ai_client is not None else None
-    message_id = telegram_publisher.publish_post(generated_post, image)
-    return content_plan_repository.mark_item_published(item_id, message_id)
+    return content_plan_repository.get_item(item_id)
 
 
 def reject_content_plan_item_publication(

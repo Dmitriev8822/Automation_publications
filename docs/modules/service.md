@@ -127,7 +127,7 @@ Unit-тесты должны передавать fake-объекты вмест
 
 Для сценария напоминаний добавлены функции:
 
-- `approve_content_plan_item_publication(item_id, telegram_publisher, content_plan_repository, ai_client=None)` — публикует конкретный пункт сразу после одобрения пользователя и помечает его `published`;
+- `approve_content_plan_item_publication(item_id, telegram_publisher, content_plan_repository, ai_client=None)` — подтверждает пункт после одобрения пользователя: будущий пункт остается в расписании, а уже наступивший публикуется через общий due-сценарий `publish_due_content_plan_items(...)`;
 - `reject_content_plan_item_publication(item_id, content_plan_repository, reason=None)` — отменяет пункт после отказа пользователя;
 - `regenerate_content_plan_item_text(item_id, ai_client, content_plan_repository, instruction="")` — просит AI обновить текст и сохраняет результат;
 - `regenerate_content_plan_item_image(item_id, ai_client, content_plan_repository, instruction="")` — просит AI обновить prompt картинки и сохраняет результат.
