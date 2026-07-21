@@ -322,8 +322,7 @@ class TelegramPublisher:
             self._send_main_menu(self._message_chat_id(message), "Главное меню")
 
         @self.bot.message_handler(
-            func=lambda message: self._message_text(message)
-            in MANUAL_POST_APPROVAL_BUTTON_TEXTS
+            func=lambda message: self._is_manual_post_approval_message(message)
         )
         def handle_manual_post_approval(message: Any) -> None:
             chat_id = self._message_chat_id(message)
@@ -574,6 +573,14 @@ class TelegramPublisher:
                     "Диалог контент-плана закрыт. Выберите действие в меню.",
                 )
                 return
+            if self._is_content_plan_management_state(state):
+                self._content_plan_dialogs.pop(chat_key, None)
+                self._send_control_message(
+                    chat_id,
+                    "Вернулись в меню контент-плана. Выберите действие.",
+                    reply_markup=self._content_plan_menu_keyboard(),
+                )
+                return
             state.clear()
             state["awaiting_description"] = True
             self._send_control_message(
@@ -718,12 +725,32 @@ class TelegramPublisher:
         state.setdefault("dialog_context", []).append(f"Пользователь: {text}")
         self._generate_and_send_content_plan(chat_id, state, generate_callback)
 
+    def _is_manual_post_approval_message(self, message: Any) -> bool:
+        text = self._message_text(message)
+        if text not in MANUAL_POST_APPROVAL_BUTTON_TEXTS:
+            return False
+        return self._message_chat_key(message) in self._manual_post_dialogs
+
     def _is_content_plan_dialog_message(self, message: Any) -> bool:
         text = self._message_text(message)
         if text in MAIN_MENU_BUTTON_TEXTS or text == REMINDERS_BUTTON_TEXT:
             return False
         chat_key = self._message_chat_key(message)
         return chat_key in self._content_plan_dialogs
+
+    @staticmethod
+    def _is_content_plan_management_state(state: dict[str, Any]) -> bool:
+        return any(
+            state.get(key)
+            for key in (
+                "awaiting_delete_plan_id",
+                "awaiting_edit_plan_id",
+                "awaiting_edit_plan_instruction",
+                "awaiting_delete_item_id",
+                "awaiting_edit_item_id",
+                "awaiting_edit_instruction",
+            )
+        )
 
     def _generate_and_send_content_plan(
         self,
@@ -1081,8 +1108,7 @@ class TelegramPublisher:
         """Register controls shown in pre-publication reminders."""
 
         @self.bot.message_handler(
-            func=lambda message: self._message_text(message)
-            in REMINDER_APPROVAL_BUTTON_TEXTS
+            func=lambda message: self._is_publication_approval_message(message)
         )
         def handle_publication_approval(message: Any) -> None:
             chat_id = self._message_chat_id(message)
@@ -1126,6 +1152,14 @@ class TelegramPublisher:
                 self._send_control_message(
                     chat_id, f"❌ Не удалось выполнить действие: {exc}"
                 )
+
+    def _is_publication_approval_message(self, message: Any) -> bool:
+        text = self._message_text(message)
+        if text not in REMINDER_APPROVAL_BUTTON_TEXTS:
+            return False
+        if text in {MENU_BUTTON_TEXT, CANCEL_BUTTON_TEXT, BACK_BUTTON_TEXT}:
+            return self._message_chat_key(message) in self._pending_reminder_items
+        return True
 
     def _set_quick_commands(self) -> None:
         """Expose /start and /menu in Telegram quick commands."""

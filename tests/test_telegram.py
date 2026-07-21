@@ -390,7 +390,14 @@ def dispatch_text(bot: FakeBot, chat_id: int, text: str) -> None:
     message = SimpleNamespace(chat=SimpleNamespace(id=chat_id), text=text)
     for handler in bot.handlers:
         predicate = handler["kwargs"].get("func")
-        if predicate is None or predicate(message):
+        commands = handler["kwargs"].get("commands")
+        if commands is not None:
+            command = text.removeprefix("/") if text.startswith("/") else None
+            if command in commands:
+                handler["func"](message)
+                return
+            continue
+        if predicate is not None and predicate(message):
             handler["func"](message)
             return
     raise AssertionError(f"No handler matched text: {text}")
@@ -922,3 +929,37 @@ def test_content_plan_view_can_edit_whole_plan_with_ai_instruction() -> None:
     assert edited_plans == [(3, "измени весь план на следующую неделю")]
     assert "Контент-план #3 обновлен через ИИ" in bot.sent_messages[-1]["text"]
     assert "Обновленный КП" in bot.sent_messages[-1]["text"]
+
+
+def test_back_from_content_plan_delete_is_not_handled_as_manual_approval() -> None:
+    bot = FakeBot()
+    publisher = TelegramPublisher(settings=make_settings(), bot=bot)
+
+    publisher.register_manual_publish_handler(
+        lambda progress: make_manual_draft(),
+        lambda draft: None,
+        lambda draft: draft,
+        lambda draft: draft,
+    )
+    publisher.register_content_plan_handler(
+        lambda description, context=None: make_plan(),
+        lambda plan: None,
+        lambda: [(7, make_plan().items[0])],
+        lambda item_id: None,
+        lambda item_id, instruction: make_plan().items[0],
+        lambda: [(3, make_plan())],
+        lambda plan_id: None,
+        lambda plan_id, instruction: make_plan(),
+    )
+
+    dispatch_text(bot, 555, CONTENT_PLAN_BUTTON_TEXT)
+    dispatch_text(bot, 555, VIEW_CONTENT_PLAN_BUTTON_TEXT)
+    dispatch_text(bot, 555, DELETE_CONTENT_PLAN_BUTTON_TEXT)
+    dispatch_text(bot, 555, BACK_BUTTON_TEXT)
+
+    assert bot.sent_messages[-1]["text"] == "Вернулись в меню контент-плана. Выберите действие."
+    assert bot.sent_messages[-1]["reply_markup"] is not None
+    assert all(
+        message["text"] != "Нет новости, ожидающей согласования."
+        for message in bot.sent_messages
+    )
