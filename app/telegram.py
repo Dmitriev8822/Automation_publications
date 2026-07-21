@@ -1102,8 +1102,12 @@ class TelegramPublisher:
         self,
         approve_callback: Callable[[int], Any],
         reject_callback: Callable[[int], Any],
-        regenerate_text_callback: Callable[[int], ContentPlanItem],
-        regenerate_image_callback: Callable[[int], ContentPlanItem],
+        regenerate_text_callback: Callable[
+            [int], ContentPlanItem | tuple[ContentPlanItem, ImageAsset | None]
+        ],
+        regenerate_image_callback: Callable[
+            [int], ContentPlanItem | tuple[ContentPlanItem, ImageAsset | None]
+        ],
     ) -> None:
         """Register controls shown in pre-publication reminders."""
 
@@ -1131,7 +1135,7 @@ class TelegramPublisher:
                     self._pending_reminder_items.pop(chat_key, None)
                     self._send_control_message(
                         chat_id,
-                        "✅ Пост одобрен и опубликован в канале.",
+                        "✅ Пост одобрен и останется в расписании. Опубликуется по таймеру.",
                         reply_markup=self._manual_publish_keyboard(),
                     )
                 elif text == REJECT_REMINDER_BUTTON_TEXT:
@@ -1143,15 +1147,27 @@ class TelegramPublisher:
                         reply_markup=self._manual_publish_keyboard(),
                     )
                 elif text == REGENERATE_REMINDER_TEXT_BUTTON_TEXT:
-                    item = regenerate_text_callback(item_id)
-                    self.send_publication_reminder(chat_id, item_id, item)
+                    item, image = self._unpack_regenerated_reminder_preview(
+                        regenerate_text_callback(item_id)
+                    )
+                    self.send_publication_reminder(chat_id, item_id, item, image)
                 elif text == REGENERATE_REMINDER_IMAGE_BUTTON_TEXT:
-                    item = regenerate_image_callback(item_id)
-                    self.send_publication_reminder(chat_id, item_id, item)
+                    item, image = self._unpack_regenerated_reminder_preview(
+                        regenerate_image_callback(item_id)
+                    )
+                    self.send_publication_reminder(chat_id, item_id, item, image)
             except Exception as exc:
                 self._send_control_message(
                     chat_id, f"❌ Не удалось выполнить действие: {exc}"
                 )
+
+    @staticmethod
+    def _unpack_regenerated_reminder_preview(
+        result: ContentPlanItem | tuple[ContentPlanItem, ImageAsset | None],
+    ) -> tuple[ContentPlanItem, ImageAsset | None]:
+        if isinstance(result, tuple):
+            return result
+        return result, None
 
     def _is_publication_approval_message(self, message: Any) -> bool:
         text = self._message_text(message)

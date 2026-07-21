@@ -157,7 +157,6 @@ def test_successful_scenario_reports_progress() -> None:
     ]
 
 
-
 def test_reports_when_image_generation_returns_none() -> None:
     progress_messages: list[str] = []
 
@@ -173,7 +172,10 @@ def test_reports_when_image_generation_returns_none() -> None:
     )
 
     assert result is not None
-    assert "⚠️ Изображение не сгенерировано: ENABLE_IMAGE_GENERATION=false" in progress_messages
+    assert (
+        "⚠️ Изображение не сгенерировано: ENABLE_IMAGE_GENERATION=false"
+        in progress_messages
+    )
 
 
 def test_skips_already_published_news() -> None:
@@ -185,7 +187,10 @@ def test_skips_already_published_news() -> None:
     result = create_and_publish_post(ai_client, FakeTelegramPublisher(), repository)
 
     assert result is not None
-    assert repository.checked_urls == ["https://example.com/news/1", "https://example.com/news/2"]
+    assert repository.checked_urls == [
+        "https://example.com/news/1",
+        "https://example.com/news/2",
+    ]
     assert ai_client.generated_posts == [second]
     assert repository.published == [("https://example.com/news/2", 777)]
 
@@ -193,7 +198,9 @@ def test_skips_already_published_news() -> None:
 def test_returns_none_when_there_are_no_new_news() -> None:
     repository = FakeRepository(published_urls={"https://example.com/news/1"})
 
-    result = create_and_publish_post(FakeAIClient([make_news()]), FakeTelegramPublisher(), repository)
+    result = create_and_publish_post(
+        FakeAIClient([make_news()]), FakeTelegramPublisher(), repository
+    )
 
     assert result is None
     assert repository.generated == []
@@ -204,7 +211,10 @@ def test_returns_none_when_there_are_no_new_news() -> None:
 def test_returns_none_when_news_list_is_empty() -> None:
     repository = FakeRepository()
 
-    assert create_and_publish_post(FakeAIClient([]), FakeTelegramPublisher(), repository) is None
+    assert (
+        create_and_publish_post(FakeAIClient([]), FakeTelegramPublisher(), repository)
+        is None
+    )
     assert repository.checked_urls == []
 
 
@@ -212,9 +222,15 @@ def test_text_generation_error_marks_failed() -> None:
     repository = FakeRepository()
 
     with pytest.raises(RuntimeError, match="text generation failed"):
-        create_and_publish_post(FakeAIClient([make_news()], fail_post=True), FakeTelegramPublisher(), repository)
+        create_and_publish_post(
+            FakeAIClient([make_news()], fail_post=True),
+            FakeTelegramPublisher(),
+            repository,
+        )
 
-    assert repository.failed == [("https://example.com/news/1", "text generation failed")]
+    assert repository.failed == [
+        ("https://example.com/news/1", "text generation failed")
+    ]
     assert repository.generated == []
 
 
@@ -222,9 +238,15 @@ def test_image_generation_error_marks_failed() -> None:
     repository = FakeRepository()
 
     with pytest.raises(RuntimeError, match="image generation failed"):
-        create_and_publish_post(FakeAIClient([make_news()], fail_image=True), FakeTelegramPublisher(), repository)
+        create_and_publish_post(
+            FakeAIClient([make_news()], fail_image=True),
+            FakeTelegramPublisher(),
+            repository,
+        )
 
-    assert repository.failed == [("https://example.com/news/1", "image generation failed")]
+    assert repository.failed == [
+        ("https://example.com/news/1", "image generation failed")
+    ]
     assert len(repository.generated) == 1
 
 
@@ -232,7 +254,9 @@ def test_telegram_error_marks_failed() -> None:
     repository = FakeRepository()
 
     with pytest.raises(RuntimeError, match="telegram failed"):
-        create_and_publish_post(FakeAIClient([make_news()]), FakeTelegramPublisher(fail=True), repository)
+        create_and_publish_post(
+            FakeAIClient([make_news()]), FakeTelegramPublisher(fail=True), repository
+        )
 
     assert repository.failed == [("https://example.com/news/1", "telegram failed")]
     assert repository.published == []
@@ -255,14 +279,28 @@ def test_reports_ai_fetch_error_when_news_list_is_empty() -> None:
         "ℹ️ Свежих неопубликованных новостей не найдено.",
     ]
 
-from app.service import approve_content_plan_item_publication, publish_due_content_plan_items
+
+from app.service import (
+    approve_content_plan_item_publication,
+    publish_due_content_plan_items,
+)
 from app.schemas import ContentPlanItem, ContentPlanItemStatus
 from datetime import datetime, timezone
 
 
 class FakeContentPlanRepository:
     def __init__(self) -> None:
-        self.items = [(5, ContentPlanItem(scheduled_at=datetime.now(timezone.utc), title="Plan post", text="Text", image_prompt=""))]
+        self.items = [
+            (
+                5,
+                ContentPlanItem(
+                    scheduled_at=datetime.now(timezone.utc),
+                    title="Plan post",
+                    text="Text",
+                    image_prompt="",
+                ),
+            )
+        ]
         self.published: list[tuple[int, int]] = []
         self.failed: list[tuple[int, str]] = []
 
@@ -273,13 +311,25 @@ class FakeContentPlanRepository:
         assert item_id == self.items[0][0]
         return self.items[0][1]
 
-    def mark_item_published(self, item_id: int, telegram_message_id: int) -> ContentPlanItem:
+    def mark_item_published(
+        self, item_id: int, telegram_message_id: int
+    ) -> ContentPlanItem:
         self.published.append((item_id, telegram_message_id))
-        return self.items[0][1].model_copy(update={"status": ContentPlanItemStatus.PUBLISHED, "telegram_message_id": telegram_message_id})
+        return self.items[0][1].model_copy(
+            update={
+                "status": ContentPlanItemStatus.PUBLISHED,
+                "telegram_message_id": telegram_message_id,
+            }
+        )
 
     def mark_item_failed(self, item_id: int, error_message: str) -> ContentPlanItem:
         self.failed.append((item_id, error_message))
-        return self.items[0][1].model_copy(update={"status": ContentPlanItemStatus.FAILED, "error_message": error_message})
+        return self.items[0][1].model_copy(
+            update={
+                "status": ContentPlanItemStatus.FAILED,
+                "error_message": error_message,
+            }
+        )
 
 
 def test_publish_due_content_plan_items_publishes_due_items() -> None:
@@ -294,24 +344,14 @@ def test_publish_due_content_plan_items_publishes_due_items() -> None:
     assert publisher.published[0][0].title == "Plan post"
 
 
-def test_approve_content_plan_item_publication_publishes_immediately() -> None:
+def test_approve_content_plan_item_publication_keeps_item_scheduled() -> None:
     repo = FakeContentPlanRepository()
     publisher = FakeTelegramPublisher()
 
     result = approve_content_plan_item_publication(5, publisher, repo)
 
-    assert result.status is ContentPlanItemStatus.PUBLISHED
-    assert result.telegram_message_id == 777
-    assert publisher.published[0][0].title == "Plan post"
-    assert repo.published == [(5, 777)]
-
-
-def test_approve_content_plan_item_publication_marks_failed_on_error() -> None:
-    repo = FakeContentPlanRepository()
-    publisher = FakeTelegramPublisher(fail=True)
-
-    with pytest.raises(RuntimeError, match="telegram failed"):
-        approve_content_plan_item_publication(5, publisher, repo)
-
-    assert repo.failed == [(5, "telegram failed")]
+    assert result.status is ContentPlanItemStatus.SCHEDULED
+    assert result.telegram_message_id is None
+    assert publisher.published == []
     assert repo.published == []
+    assert repo.failed == []

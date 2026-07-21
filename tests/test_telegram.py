@@ -13,6 +13,7 @@ from app.config import Settings
 from app.schemas import GeneratedPost, ImageAsset
 from app.telegram import (
     MANUAL_PUBLISH_BUTTON_TEXT,
+    REGENERATE_REMINDER_IMAGE_BUTTON_TEXT,
     START_INSTRUCTION_TEXT,
     TelegramPublisher,
 )
@@ -492,7 +493,28 @@ def test_reminders_dialog_saves_minutes_and_approval_handler_confirms_publicatio
     assert publisher.reminder_chat_id == 777
     assert configured == [(15, 777)]
     assert approved == [42]
-    assert bot.sent_messages[-1]["text"] == "✅ Пост одобрен и опубликован в канале."
+    assert (
+        bot.sent_messages[-1]["text"]
+        == "✅ Пост одобрен и останется в расписании. Опубликуется по таймеру."
+    )
+
+
+def test_publication_approval_regeneration_can_resend_image_preview() -> None:
+    bot = FakeBot()
+    publisher = TelegramPublisher(settings=make_settings(), bot=bot)
+
+    publisher.register_publication_approval_handler(
+        lambda item_id: None,
+        lambda item_id: None,
+        lambda item_id: (make_plan().items[0], ImageAsset(data=b"new-image")),
+        lambda item_id: (make_plan().items[0], ImageAsset(data=b"new-image")),
+    )
+    publisher.send_publication_reminder(777, 42, make_plan().items[0])
+
+    dispatch_text(bot, 777, REGENERATE_REMINDER_IMAGE_BUTTON_TEXT)
+
+    assert bot.sent_photos[-1]["chat_id"] == 777
+    assert "Картинка:" in bot.sent_photos[-1]["caption"]
 
 
 def test_reminders_dialog_supports_preset_and_custom_minutes() -> None:
@@ -957,7 +979,10 @@ def test_back_from_content_plan_delete_is_not_handled_as_manual_approval() -> No
     dispatch_text(bot, 555, DELETE_CONTENT_PLAN_BUTTON_TEXT)
     dispatch_text(bot, 555, BACK_BUTTON_TEXT)
 
-    assert bot.sent_messages[-1]["text"] == "Вернулись в меню контент-плана. Выберите действие."
+    assert (
+        bot.sent_messages[-1]["text"]
+        == "Вернулись в меню контент-плана. Выберите действие."
+    )
     assert bot.sent_messages[-1]["reply_markup"] is not None
     assert all(
         message["text"] != "Нет новости, ожидающей согласования."
