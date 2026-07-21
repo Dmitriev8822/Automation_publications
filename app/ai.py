@@ -194,6 +194,23 @@ class AIClient:
         plan = self._normalize_content_plan_datetimes(response.plan)
         return plan.model_copy(update={"raw_request": description})
 
+    def regenerate_content_plan(
+        self, plan: ContentPlan, instruction: str = ""
+    ) -> ContentPlan:
+        """Regenerate an approved content plan using a user edit instruction."""
+
+        description = (
+            f"Edit the existing approved content plan according to the user instruction. "
+            f"User instruction: {instruction or 'improve the plan while preserving the strategy'}. "
+            f"Current plan JSON: {plan.model_dump_json()}. "
+            "Return the full updated content plan, not a partial patch."
+        )
+        updated = self.generate_content_plan(
+            description,
+            ["Редактирование уже согласованного контент-плана целиком."],
+        )
+        return updated.model_copy(update={"raw_request": plan.raw_request})
+
     def regenerate_content_plan_item_text(
         self, item: ContentPlanItem, instruction: str = ""
     ) -> ContentPlanItem:
@@ -332,7 +349,9 @@ class AIClient:
             if hasattr(response, "raise_for_status"):
                 response.raise_for_status()
             data = response.json() if hasattr(response, "json") else response
-        except Exception as exc:  # noqa: BLE001 - normalize third-party/client errors for callers
+        except (
+            Exception
+        ) as exc:  # noqa: BLE001 - normalize third-party/client errors for callers
             logger.warning(
                 "OpenRouter image generation request failed: endpoint=%s model=%s error=%s",
                 self.settings.image_generation_url,
@@ -488,7 +507,9 @@ class AIClient:
             if hasattr(response, "raise_for_status"):
                 response.raise_for_status()
             return response.json() if hasattr(response, "json") else response
-        except Exception as exc:  # noqa: BLE001 - normalize third-party/client errors for callers
+        except (
+            Exception
+        ) as exc:  # noqa: BLE001 - normalize third-party/client errors for callers
             logger.warning(
                 "OpenRouter request failed: endpoint=%s model=%s schema=%s error=%s",
                 self.settings.chat_completions_url,

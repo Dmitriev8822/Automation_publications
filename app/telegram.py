@@ -28,6 +28,10 @@ CONTENT_PLAN_BUTTON_TEXT = "🗓️ Контент план"
 REMINDERS_BUTTON_TEXT = "⏰ Напоминания"
 VIEW_CONTENT_PLAN_BUTTON_TEXT = "👀 Посмотреть КП"
 CREATE_CONTENT_PLAN_BUTTON_TEXT = "📝 Составить КП"
+EDIT_CONTENT_PLAN_BUTTON_TEXT = "✏️ Отредактировать план"
+DELETE_CONTENT_PLAN_BUTTON_TEXT = "🗑️ Удалить план"
+EDIT_CONTENT_PLAN_ITEM_BUTTON_TEXT = "✏️ Отредактировать пункт"
+DELETE_CONTENT_PLAN_ITEM_BUTTON_TEXT = "🗑️ Удалить пункт"
 APPROVE_MANUAL_POST_BUTTON_TEXT = "✅ Принять"
 REJECT_MANUAL_POST_BUTTON_TEXT = "❌ Отменить"
 REGENERATE_MANUAL_TEXT_BUTTON_TEXT = "✍️ Перегенерировать текст и изображение"
@@ -73,6 +77,10 @@ MANUAL_POST_APPROVAL_BUTTON_TEXTS = {
 CONTENT_PLAN_DIALOG_BUTTON_TEXTS = {
     VIEW_CONTENT_PLAN_BUTTON_TEXT,
     CREATE_CONTENT_PLAN_BUTTON_TEXT,
+    EDIT_CONTENT_PLAN_BUTTON_TEXT,
+    DELETE_CONTENT_PLAN_BUTTON_TEXT,
+    EDIT_CONTENT_PLAN_ITEM_BUTTON_TEXT,
+    DELETE_CONTENT_PLAN_ITEM_BUTTON_TEXT,
     REMINDERS_BUTTON_TEXT,
     REGENERATE_CONTENT_PLAN_BUTTON_TEXT,
     APPROVE_CONTENT_PLAN_BUTTON_TEXT,
@@ -369,6 +377,11 @@ class TelegramPublisher:
         generate_callback: Callable[[str], ContentPlan],
         approve_callback: Callable[[ContentPlan], Any],
         list_callback: Callable[[], list[tuple[int, ContentPlanItem]]] | None = None,
+        delete_callback: Callable[[int], Any] | None = None,
+        edit_callback: Callable[[int, str], ContentPlanItem] | None = None,
+        plan_list_callback: Callable[[], list[tuple[int, ContentPlan]]] | None = None,
+        delete_plan_callback: Callable[[int], Any] | None = None,
+        edit_plan_callback: Callable[[int, str], ContentPlan] | None = None,
     ) -> None:
         """Register a Telegram dialog for generating and approving content plans."""
 
@@ -436,8 +449,67 @@ class TelegramPublisher:
                 return
             self._send_control_message(
                 chat_id,
-                self._format_content_plan_items(list_callback()),
-                reply_markup=self._manual_publish_keyboard(),
+                self._format_content_plan_overview(
+                    list_callback(),
+                    plan_list_callback() if plan_list_callback is not None else [],
+                ),
+                reply_markup=self._content_plan_view_keyboard(),
+            )
+
+        @self.bot.message_handler(
+            func=lambda message: getattr(message, "text", None)
+            == DELETE_CONTENT_PLAN_ITEM_BUTTON_TEXT
+        )
+        def handle_content_plan_delete_start(message: Any) -> None:
+            chat_id = self._message_chat_id(message)
+            chat_key = self._chat_key(chat_id)
+            self._content_plan_dialogs[chat_key] = {"awaiting_delete_item_id": True}
+            self._send_control_message(
+                chat_id,
+                "Напишите номер пункта КП, который нужно удалить, например 7.",
+                reply_markup=self._content_plan_description_keyboard(),
+            )
+
+        @self.bot.message_handler(
+            func=lambda message: getattr(message, "text", None)
+            == EDIT_CONTENT_PLAN_ITEM_BUTTON_TEXT
+        )
+        def handle_content_plan_edit_start(message: Any) -> None:
+            chat_id = self._message_chat_id(message)
+            chat_key = self._chat_key(chat_id)
+            self._content_plan_dialogs[chat_key] = {"awaiting_edit_item_id": True}
+            self._send_control_message(
+                chat_id,
+                "Напишите номер пункта КП для редактирования, например 7.",
+                reply_markup=self._content_plan_description_keyboard(),
+            )
+
+        @self.bot.message_handler(
+            func=lambda message: getattr(message, "text", None)
+            == DELETE_CONTENT_PLAN_BUTTON_TEXT
+        )
+        def handle_content_plan_delete_whole_start(message: Any) -> None:
+            chat_id = self._message_chat_id(message)
+            chat_key = self._chat_key(chat_id)
+            self._content_plan_dialogs[chat_key] = {"awaiting_delete_plan_id": True}
+            self._send_control_message(
+                chat_id,
+                "Напишите номер всего КП, который нужно удалить, например КП #3.",
+                reply_markup=self._content_plan_description_keyboard(),
+            )
+
+        @self.bot.message_handler(
+            func=lambda message: getattr(message, "text", None)
+            == EDIT_CONTENT_PLAN_BUTTON_TEXT
+        )
+        def handle_content_plan_edit_whole_start(message: Any) -> None:
+            chat_id = self._message_chat_id(message)
+            chat_key = self._chat_key(chat_id)
+            self._content_plan_dialogs[chat_key] = {"awaiting_edit_plan_id": True}
+            self._send_control_message(
+                chat_id,
+                "Напишите номер всего КП для редактирования, например КП #3.",
+                reply_markup=self._content_plan_description_keyboard(),
             )
 
         @self.bot.message_handler(
@@ -459,7 +531,13 @@ class TelegramPublisher:
         )
         def handle_content_plan_dialog(message: Any) -> None:
             self._handle_content_plan_dialog_message(
-                message, generate_callback, approve_callback
+                message,
+                generate_callback,
+                approve_callback,
+                delete_callback,
+                edit_callback,
+                delete_plan_callback,
+                edit_plan_callback,
             )
 
     def _handle_content_plan_dialog_message(
@@ -467,6 +545,10 @@ class TelegramPublisher:
         message: Any,
         generate_callback: Callable[[str], ContentPlan],
         approve_callback: Callable[[ContentPlan], Any],
+        delete_callback: Callable[[int], Any] | None = None,
+        edit_callback: Callable[[int, str], ContentPlanItem] | None = None,
+        delete_plan_callback: Callable[[int], Any] | None = None,
+        edit_plan_callback: Callable[[int, str], ContentPlan] | None = None,
     ) -> None:
         chat_id = self._message_chat_id(message)
         chat_key = self._chat_key(chat_id)
@@ -488,6 +570,112 @@ class TelegramPublisher:
                 chat_id,
                 "Вернулись на шаг описания. Отправьте новый контент-план в свободном формате или нажмите «Отмена».",
                 reply_markup=self._content_plan_description_keyboard(),
+            )
+            return
+
+        if state.get("awaiting_delete_plan_id"):
+            plan_id = self._parse_content_plan_item_id(text)
+            if plan_id is None:
+                self._send_control_message(
+                    chat_id, "Напишите числовой id КП, например 3."
+                )
+                return
+            if delete_plan_callback is None:
+                self._send_control_message(
+                    chat_id, "Удаление всего контент-плана не настроено."
+                )
+                return
+            delete_plan_callback(plan_id)
+            self._content_plan_dialogs.pop(chat_key, None)
+            self._send_control_message(
+                chat_id,
+                f"🗑️ Контент-план #{plan_id} удален.",
+                reply_markup=self._manual_publish_keyboard(),
+            )
+            return
+
+        if state.get("awaiting_edit_plan_id"):
+            plan_id = self._parse_content_plan_item_id(text)
+            if plan_id is None:
+                self._send_control_message(
+                    chat_id, "Напишите числовой id КП, например 3."
+                )
+                return
+            state.clear()
+            state["awaiting_edit_plan_instruction"] = True
+            state["edit_plan_id"] = plan_id
+            self._send_control_message(
+                chat_id,
+                "Напишите, что изменить во всем КП. ИИ перестроит план целиком.",
+            )
+            return
+
+        if state.get("awaiting_edit_plan_instruction"):
+            if edit_plan_callback is None:
+                self._send_control_message(
+                    chat_id, "Редактирование всего контент-плана не настроено."
+                )
+                return
+            plan_id = int(state["edit_plan_id"])
+            updated_plan = edit_plan_callback(plan_id, text)
+            self._content_plan_dialogs.pop(chat_key, None)
+            self._send_control_message(
+                chat_id,
+                f"✏️ Контент-план #{plan_id} обновлен через ИИ.\n\n{self._format_content_plan(updated_plan)}",
+                reply_markup=self._manual_publish_keyboard(),
+            )
+            return
+
+        if state.get("awaiting_delete_item_id"):
+            item_id = self._parse_content_plan_item_id(text)
+            if item_id is None:
+                self._send_control_message(
+                    chat_id, "Напишите числовой id пункта КП, например 7."
+                )
+                return
+            if delete_callback is None:
+                self._send_control_message(
+                    chat_id, "Удаление контент-плана не настроено."
+                )
+                return
+            delete_callback(item_id)
+            self._content_plan_dialogs.pop(chat_key, None)
+            self._send_control_message(
+                chat_id,
+                f"🗑️ Пункт КП #{item_id} удален.",
+                reply_markup=self._manual_publish_keyboard(),
+            )
+            return
+
+        if state.get("awaiting_edit_item_id"):
+            item_id = self._parse_content_plan_item_id(text)
+            if item_id is None:
+                self._send_control_message(
+                    chat_id, "Напишите числовой id пункта КП, например 7."
+                )
+                return
+            state.clear()
+            state["awaiting_edit_instruction"] = True
+            state["edit_item_id"] = item_id
+            self._send_control_message(
+                chat_id,
+                "Напишите, что изменить. ИИ применит правки к выбранному пункту КП.",
+            )
+            return
+
+        if state.get("awaiting_edit_instruction"):
+            if edit_callback is None:
+                self._send_control_message(
+                    chat_id, "Редактирование контент-плана не настроено."
+                )
+                return
+            item_id = int(state["edit_item_id"])
+            updated_item = edit_callback(item_id, text)
+            self._content_plan_dialogs.pop(chat_key, None)
+            self._send_control_message(
+                chat_id,
+                f"✏️ Пункт КП #{item_id} обновлен через ИИ.\n\n{self._format_content_plan_items([(item_id, updated_item)])}",
+                reply_markup=self._manual_publish_keyboard(),
             )
             return
 
@@ -761,6 +949,14 @@ class TelegramPublisher:
         return keyboard
 
     @staticmethod
+    def _parse_content_plan_item_id(text: str) -> int | None:
+        digits = "".join(character for character in text if character.isdigit())
+        if not digits:
+            return None
+        item_id = int(digits)
+        return item_id if item_id > 0 else None
+
+    @staticmethod
     def _content_plan_menu_keyboard() -> types.ReplyKeyboardMarkup:
         keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
         keyboard.add(
@@ -769,6 +965,35 @@ class TelegramPublisher:
         )
         keyboard.add(types.KeyboardButton(REMINDERS_BUTTON_TEXT))
         return keyboard
+
+    @staticmethod
+    def _content_plan_view_keyboard() -> types.ReplyKeyboardMarkup:
+        keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        keyboard.add(
+            types.KeyboardButton(EDIT_CONTENT_PLAN_ITEM_BUTTON_TEXT),
+            types.KeyboardButton(DELETE_CONTENT_PLAN_ITEM_BUTTON_TEXT),
+        )
+        keyboard.add(
+            types.KeyboardButton(EDIT_CONTENT_PLAN_BUTTON_TEXT),
+            types.KeyboardButton(DELETE_CONTENT_PLAN_BUTTON_TEXT),
+        )
+        keyboard.add(types.KeyboardButton(CANCEL_BUTTON_TEXT))
+        return keyboard
+
+    @classmethod
+    def _format_content_plan_overview(
+        cls,
+        items: list[tuple[int, ContentPlanItem]],
+        plans: list[tuple[int, ContentPlan]],
+    ) -> str:
+        sections: list[str] = []
+        if plans:
+            lines = ["🗂️ Контент-планы:", ""]
+            for plan_id, plan in plans:
+                lines.append(f"КП #{plan_id}: {plan.title} ({len(plan.items)} пунктов)")
+            sections.append("\n".join(lines))
+        sections.append(cls._format_content_plan_items(items))
+        return "\n\n".join(sections).strip()
 
     @staticmethod
     def _format_content_plan_items(items: list[tuple[int, ContentPlanItem]]) -> str:
