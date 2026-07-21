@@ -35,13 +35,20 @@ from app.service import (
     create_manual_publication_draft,
     publish_due_content_plan_items,
     publish_manual_publication_draft,
+    reject_content_plan_publication,
+    regenerate_content_plan,
     regenerate_content_plan_item_image,
     regenerate_content_plan_item_text,
     regenerate_manual_publication_image,
     regenerate_manual_publication_text,
     reject_content_plan_item_publication,
 )
-from app.schemas import ContentPlanItem, ContentPlanItemStatus, GeneratedPost, ImageAsset
+from app.schemas import (
+    ContentPlanItem,
+    ContentPlanItemStatus,
+    GeneratedPost,
+    ImageAsset,
+)
 from app.telegram import TelegramPublisher
 
 logger = logging.getLogger(__name__)
@@ -120,9 +127,7 @@ def build_runtime(settings: Settings) -> ApplicationRuntime:
     telegram_publisher = TelegramPublisher(settings)
 
     def scheduled_content_plan_job():
-        publish_due_content_plan_items(
-            telegram_publisher, content_plan_repository, ai_client
-        )
+        publish_due_content_plan_items(telegram_publisher, content_plan_repository)
 
     manual_prepare_job = lambda progress: create_manual_publication_draft(
         ai_client, repository, progress_callback=progress
@@ -177,11 +182,68 @@ def build_runtime(settings: Settings) -> ApplicationRuntime:
     list_scheduled_items = getattr(
         content_plan_repository, "list_scheduled_items", lambda: []
     )
+    list_scheduled_plans = getattr(
+        content_plan_repository, "list_scheduled_plans", lambda: []
+    )
+
+    def delete_content_plan_item(item_id: int) -> ContentPlanItem:
+        item = reject_content_plan_item_publication(
+            item_id, content_plan_repository, "User deleted item from content-plan view"
+        )
+        add_content_plan_item_jobs(
+            scheduler,
+            scheduled_content_plan_job,
+            content_plan_repository.get_scheduled_item_slots(),
+        )
+        schedule_persistent_reminders()
+        return item
+
+    def edit_content_plan_item(item_id: int, instruction: str) -> ContentPlanItem:
+        item = regenerate_content_plan_item_text(
+            item_id, ai_client, content_plan_repository, instruction
+        )
+        add_content_plan_item_jobs(
+            scheduler,
+            scheduled_content_plan_job,
+            content_plan_repository.get_scheduled_item_slots(),
+        )
+        schedule_persistent_reminders()
+        return item
+
+    def delete_content_plan(plan_id: int) -> list[ContentPlanItem]:
+        items = reject_content_plan_publication(
+            plan_id, content_plan_repository, "User deleted whole content plan"
+        )
+        add_content_plan_item_jobs(
+            scheduler,
+            scheduled_content_plan_job,
+            content_plan_repository.get_scheduled_item_slots(),
+        )
+        schedule_persistent_reminders()
+        return items
+
+    def edit_content_plan(plan_id: int, instruction: str):
+        _plan_id, plan = regenerate_content_plan(
+            plan_id, ai_client, content_plan_repository, instruction
+        )
+        add_content_plan_item_jobs(
+            scheduler,
+            scheduled_content_plan_job,
+            content_plan_repository.get_scheduled_item_slots(),
+        )
+        schedule_persistent_reminders()
+        return plan
+
     try:
         telegram_publisher.register_content_plan_handler(
             ai_client.generate_content_plan,
             save_content_plan_and_schedule,
             list_scheduled_items,
+            delete_content_plan_item,
+            edit_content_plan_item,
+            list_scheduled_plans,
+            delete_content_plan,
+            edit_content_plan,
         )
     except TypeError:
         logger.warning(
@@ -225,10 +287,10 @@ def build_runtime(settings: Settings) -> ApplicationRuntime:
             lambda item_id: reject_content_plan_item_publication(
                 item_id, content_plan_repository
             ),
-            lambda item_id: regenerate_content_plan_item_text(
+            lambda item_id: _regenerate_content_plan_item_text_preview(
                 item_id, ai_client, content_plan_repository
             ),
-            lambda item_id: regenerate_content_plan_item_image(
+            lambda item_id: _regenerate_content_plan_item_image_preview(
                 item_id, ai_client, content_plan_repository
             ),
         )
@@ -263,6 +325,28 @@ def _generate_content_plan_item_preview_image(
             exc_info=True,
         )
         return None
+
+
+def _regenerate_content_plan_item_text_preview(
+    item_id: int, ai_client: AIClient, content_plan_repository: ContentPlanRepository
+) -> tuple[ContentPlanItem, ImageAsset | None]:
+    """Regenerate text and return a fresh image preview for the reminder chat."""
+
+    item = regenerate_content_plan_item_text(
+        item_id, ai_client, content_plan_repository
+    )
+    return item, _generate_content_plan_item_preview_image(item_id, item, ai_client)
+
+
+def _regenerate_content_plan_item_image_preview(
+    item_id: int, ai_client: AIClient, content_plan_repository: ContentPlanRepository
+) -> tuple[ContentPlanItem, ImageAsset | None]:
+    """Regenerate image prompt and return a fresh image preview for the reminder chat."""
+
+    item = regenerate_content_plan_item_image(
+        item_id, ai_client, content_plan_repository
+    )
+    return item, _generate_content_plan_item_preview_image(item_id, item, ai_client)
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:

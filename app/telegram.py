@@ -28,6 +28,10 @@ CONTENT_PLAN_BUTTON_TEXT = "🗓️ Контент план"
 REMINDERS_BUTTON_TEXT = "⏰ Напоминания"
 VIEW_CONTENT_PLAN_BUTTON_TEXT = "👀 Посмотреть КП"
 CREATE_CONTENT_PLAN_BUTTON_TEXT = "📝 Составить КП"
+EDIT_CONTENT_PLAN_BUTTON_TEXT = "✏️ Отредактировать план"
+DELETE_CONTENT_PLAN_BUTTON_TEXT = "🗑️ Удалить план"
+EDIT_CONTENT_PLAN_ITEM_BUTTON_TEXT = "✏️ Отредактировать пункт"
+DELETE_CONTENT_PLAN_ITEM_BUTTON_TEXT = "🗑️ Удалить пункт"
 APPROVE_MANUAL_POST_BUTTON_TEXT = "✅ Принять"
 REJECT_MANUAL_POST_BUTTON_TEXT = "❌ Отменить"
 REGENERATE_MANUAL_TEXT_BUTTON_TEXT = "✍️ Перегенерировать текст и изображение"
@@ -68,11 +72,16 @@ MANUAL_POST_APPROVAL_BUTTON_TEXTS = {
     REGENERATE_MANUAL_IMAGE_BUTTON_TEXT,
     MENU_BUTTON_TEXT,
     CANCEL_BUTTON_TEXT,
+    BACK_BUTTON_TEXT,
 }
 
 CONTENT_PLAN_DIALOG_BUTTON_TEXTS = {
     VIEW_CONTENT_PLAN_BUTTON_TEXT,
     CREATE_CONTENT_PLAN_BUTTON_TEXT,
+    EDIT_CONTENT_PLAN_BUTTON_TEXT,
+    DELETE_CONTENT_PLAN_BUTTON_TEXT,
+    EDIT_CONTENT_PLAN_ITEM_BUTTON_TEXT,
+    DELETE_CONTENT_PLAN_ITEM_BUTTON_TEXT,
     REMINDERS_BUTTON_TEXT,
     REGENERATE_CONTENT_PLAN_BUTTON_TEXT,
     APPROVE_CONTENT_PLAN_BUTTON_TEXT,
@@ -88,6 +97,7 @@ REMINDER_APPROVAL_BUTTON_TEXTS = {
     REGENERATE_REMINDER_IMAGE_BUTTON_TEXT,
     MENU_BUTTON_TEXT,
     CANCEL_BUTTON_TEXT,
+    BACK_BUTTON_TEXT,
 }
 
 logger = logging.getLogger(__name__)
@@ -312,8 +322,7 @@ class TelegramPublisher:
             self._send_main_menu(self._message_chat_id(message), "Главное меню")
 
         @self.bot.message_handler(
-            func=lambda message: self._message_text(message)
-            in MANUAL_POST_APPROVAL_BUTTON_TEXTS
+            func=lambda message: self._is_manual_post_approval_message(message)
         )
         def handle_manual_post_approval(message: Any) -> None:
             chat_id = self._message_chat_id(message)
@@ -340,6 +349,7 @@ class TelegramPublisher:
                     REJECT_MANUAL_POST_BUTTON_TEXT,
                     MENU_BUTTON_TEXT,
                     CANCEL_BUTTON_TEXT,
+                    BACK_BUTTON_TEXT,
                 }:
                     self._manual_post_dialogs.pop(chat_key, None)
                     self._send_main_menu(chat_id, "❌ Публикация новости отменена.")
@@ -369,6 +379,11 @@ class TelegramPublisher:
         generate_callback: Callable[[str], ContentPlan],
         approve_callback: Callable[[ContentPlan], Any],
         list_callback: Callable[[], list[tuple[int, ContentPlanItem]]] | None = None,
+        delete_callback: Callable[[int], Any] | None = None,
+        edit_callback: Callable[[int, str], ContentPlanItem] | None = None,
+        plan_list_callback: Callable[[], list[tuple[int, ContentPlan]]] | None = None,
+        delete_plan_callback: Callable[[int], Any] | None = None,
+        edit_plan_callback: Callable[[int, str], ContentPlan] | None = None,
     ) -> None:
         """Register a Telegram dialog for generating and approving content plans."""
 
@@ -436,8 +451,67 @@ class TelegramPublisher:
                 return
             self._send_control_message(
                 chat_id,
-                self._format_content_plan_items(list_callback()),
-                reply_markup=self._manual_publish_keyboard(),
+                self._format_content_plan_overview(
+                    list_callback(),
+                    plan_list_callback() if plan_list_callback is not None else [],
+                ),
+                reply_markup=self._content_plan_view_keyboard(),
+            )
+
+        @self.bot.message_handler(
+            func=lambda message: getattr(message, "text", None)
+            == DELETE_CONTENT_PLAN_ITEM_BUTTON_TEXT
+        )
+        def handle_content_plan_delete_start(message: Any) -> None:
+            chat_id = self._message_chat_id(message)
+            chat_key = self._chat_key(chat_id)
+            self._content_plan_dialogs[chat_key] = {"awaiting_delete_item_id": True}
+            self._send_control_message(
+                chat_id,
+                "Напишите номер пункта КП, который нужно удалить, например 7.",
+                reply_markup=self._content_plan_description_keyboard(),
+            )
+
+        @self.bot.message_handler(
+            func=lambda message: getattr(message, "text", None)
+            == EDIT_CONTENT_PLAN_ITEM_BUTTON_TEXT
+        )
+        def handle_content_plan_edit_start(message: Any) -> None:
+            chat_id = self._message_chat_id(message)
+            chat_key = self._chat_key(chat_id)
+            self._content_plan_dialogs[chat_key] = {"awaiting_edit_item_id": True}
+            self._send_control_message(
+                chat_id,
+                "Напишите номер пункта КП для редактирования, например 7.",
+                reply_markup=self._content_plan_description_keyboard(),
+            )
+
+        @self.bot.message_handler(
+            func=lambda message: getattr(message, "text", None)
+            == DELETE_CONTENT_PLAN_BUTTON_TEXT
+        )
+        def handle_content_plan_delete_whole_start(message: Any) -> None:
+            chat_id = self._message_chat_id(message)
+            chat_key = self._chat_key(chat_id)
+            self._content_plan_dialogs[chat_key] = {"awaiting_delete_plan_id": True}
+            self._send_control_message(
+                chat_id,
+                "Напишите номер всего КП, который нужно удалить, например КП #3.",
+                reply_markup=self._content_plan_description_keyboard(),
+            )
+
+        @self.bot.message_handler(
+            func=lambda message: getattr(message, "text", None)
+            == EDIT_CONTENT_PLAN_BUTTON_TEXT
+        )
+        def handle_content_plan_edit_whole_start(message: Any) -> None:
+            chat_id = self._message_chat_id(message)
+            chat_key = self._chat_key(chat_id)
+            self._content_plan_dialogs[chat_key] = {"awaiting_edit_plan_id": True}
+            self._send_control_message(
+                chat_id,
+                "Напишите номер всего КП для редактирования, например КП #3.",
+                reply_markup=self._content_plan_description_keyboard(),
             )
 
         @self.bot.message_handler(
@@ -459,7 +533,13 @@ class TelegramPublisher:
         )
         def handle_content_plan_dialog(message: Any) -> None:
             self._handle_content_plan_dialog_message(
-                message, generate_callback, approve_callback
+                message,
+                generate_callback,
+                approve_callback,
+                delete_callback,
+                edit_callback,
+                delete_plan_callback,
+                edit_plan_callback,
             )
 
     def _handle_content_plan_dialog_message(
@@ -467,6 +547,10 @@ class TelegramPublisher:
         message: Any,
         generate_callback: Callable[[str], ContentPlan],
         approve_callback: Callable[[ContentPlan], Any],
+        delete_callback: Callable[[int], Any] | None = None,
+        edit_callback: Callable[[int, str], ContentPlanItem] | None = None,
+        delete_plan_callback: Callable[[int], Any] | None = None,
+        edit_plan_callback: Callable[[int, str], ContentPlan] | None = None,
     ) -> None:
         chat_id = self._message_chat_id(message)
         chat_key = self._chat_key(chat_id)
@@ -482,12 +566,133 @@ class TelegramPublisher:
             return
 
         if text == BACK_BUTTON_TEXT:
+            if state.get("awaiting_description") and state.get("plan") is None:
+                self._content_plan_dialogs.pop(chat_key, None)
+                self._send_main_menu(
+                    chat_id,
+                    "Диалог контент-плана закрыт. Выберите действие в меню.",
+                )
+                return
+            if self._is_content_plan_management_state(state):
+                self._content_plan_dialogs.pop(chat_key, None)
+                self._send_control_message(
+                    chat_id,
+                    "Вернулись в меню контент-плана. Выберите действие.",
+                    reply_markup=self._content_plan_menu_keyboard(),
+                )
+                return
             state.clear()
             state["awaiting_description"] = True
             self._send_control_message(
                 chat_id,
-                "Вернулись на шаг описания. Отправьте новый контент-план в свободном формате или нажмите «Отмена».",
+                "Вернулись на шаг описания. Отправьте новый контент-план в свободном формате или нажмите «Назад».",
                 reply_markup=self._content_plan_description_keyboard(),
+            )
+            return
+
+        if state.get("awaiting_delete_plan_id"):
+            plan_id = self._parse_content_plan_item_id(text)
+            if plan_id is None:
+                self._send_control_message(
+                    chat_id, "Напишите числовой id КП, например 3."
+                )
+                return
+            if delete_plan_callback is None:
+                self._send_control_message(
+                    chat_id, "Удаление всего контент-плана не настроено."
+                )
+                return
+            delete_plan_callback(plan_id)
+            self._content_plan_dialogs.pop(chat_key, None)
+            self._send_control_message(
+                chat_id,
+                f"🗑️ Контент-план #{plan_id} удален.",
+                reply_markup=self._manual_publish_keyboard(),
+            )
+            return
+
+        if state.get("awaiting_edit_plan_id"):
+            plan_id = self._parse_content_plan_item_id(text)
+            if plan_id is None:
+                self._send_control_message(
+                    chat_id, "Напишите числовой id КП, например 3."
+                )
+                return
+            state.clear()
+            state["awaiting_edit_plan_instruction"] = True
+            state["edit_plan_id"] = plan_id
+            self._send_control_message(
+                chat_id,
+                "Напишите, что изменить во всем КП. ИИ перестроит план целиком.",
+            )
+            return
+
+        if state.get("awaiting_edit_plan_instruction"):
+            if edit_plan_callback is None:
+                self._send_control_message(
+                    chat_id, "Редактирование всего контент-плана не настроено."
+                )
+                return
+            plan_id = int(state["edit_plan_id"])
+            updated_plan = edit_plan_callback(plan_id, text)
+            self._content_plan_dialogs.pop(chat_key, None)
+            self._send_control_message(
+                chat_id,
+                f"✏️ Контент-план #{plan_id} обновлен через ИИ.\n\n{self._format_content_plan(updated_plan)}",
+                reply_markup=self._manual_publish_keyboard(),
+            )
+            return
+
+        if state.get("awaiting_delete_item_id"):
+            item_id = self._parse_content_plan_item_id(text)
+            if item_id is None:
+                self._send_control_message(
+                    chat_id, "Напишите числовой id пункта КП, например 7."
+                )
+                return
+            if delete_callback is None:
+                self._send_control_message(
+                    chat_id, "Удаление контент-плана не настроено."
+                )
+                return
+            delete_callback(item_id)
+            self._content_plan_dialogs.pop(chat_key, None)
+            self._send_control_message(
+                chat_id,
+                f"🗑️ Пункт КП #{item_id} удален.",
+                reply_markup=self._manual_publish_keyboard(),
+            )
+            return
+
+        if state.get("awaiting_edit_item_id"):
+            item_id = self._parse_content_plan_item_id(text)
+            if item_id is None:
+                self._send_control_message(
+                    chat_id, "Напишите числовой id пункта КП, например 7."
+                )
+                return
+            state.clear()
+            state["awaiting_edit_instruction"] = True
+            state["edit_item_id"] = item_id
+            self._send_control_message(
+                chat_id,
+                "Напишите, что изменить. ИИ применит правки к выбранному пункту КП.",
+            )
+            return
+
+        if state.get("awaiting_edit_instruction"):
+            if edit_callback is None:
+                self._send_control_message(
+                    chat_id, "Редактирование контент-плана не настроено."
+                )
+                return
+            item_id = int(state["edit_item_id"])
+            updated_item = edit_callback(item_id, text)
+            self._content_plan_dialogs.pop(chat_key, None)
+            self._send_control_message(
+                chat_id,
+                f"✏️ Пункт КП #{item_id} обновлен через ИИ.\n\n{self._format_content_plan_items([(item_id, updated_item)])}",
+                reply_markup=self._manual_publish_keyboard(),
             )
             return
 
@@ -520,12 +725,32 @@ class TelegramPublisher:
         state.setdefault("dialog_context", []).append(f"Пользователь: {text}")
         self._generate_and_send_content_plan(chat_id, state, generate_callback)
 
+    def _is_manual_post_approval_message(self, message: Any) -> bool:
+        text = self._message_text(message)
+        if text not in MANUAL_POST_APPROVAL_BUTTON_TEXTS:
+            return False
+        return self._message_chat_key(message) in self._manual_post_dialogs
+
     def _is_content_plan_dialog_message(self, message: Any) -> bool:
         text = self._message_text(message)
         if text in MAIN_MENU_BUTTON_TEXTS or text == REMINDERS_BUTTON_TEXT:
             return False
         chat_key = self._message_chat_key(message)
         return chat_key in self._content_plan_dialogs
+
+    @staticmethod
+    def _is_content_plan_management_state(state: dict[str, Any]) -> bool:
+        return any(
+            state.get(key)
+            for key in (
+                "awaiting_delete_plan_id",
+                "awaiting_edit_plan_id",
+                "awaiting_edit_plan_instruction",
+                "awaiting_delete_item_id",
+                "awaiting_edit_item_id",
+                "awaiting_edit_instruction",
+            )
+        )
 
     def _generate_and_send_content_plan(
         self,
@@ -598,7 +823,7 @@ class TelegramPublisher:
         def handle_reminders_dialog(message: Any) -> None:
             chat_id = self._message_chat_id(message)
             text = (getattr(message, "text", "") or "").strip()
-            if text in {MENU_BUTTON_TEXT, CANCEL_BUTTON_TEXT}:
+            if text in {MENU_BUTTON_TEXT, CANCEL_BUTTON_TEXT, BACK_BUTTON_TEXT}:
                 self._reminder_dialogs.pop(self._chat_key(chat_id), None)
                 self._send_main_menu(
                     chat_id,
@@ -648,7 +873,7 @@ class TelegramPublisher:
 
     def _is_reminder_dialog_message(self, message: Any) -> bool:
         text = self._message_text(message)
-        if text in {MENU_BUTTON_TEXT, CANCEL_BUTTON_TEXT}:
+        if text in {MENU_BUTTON_TEXT, CANCEL_BUTTON_TEXT, BACK_BUTTON_TEXT}:
             return self._message_chat_key(message) in self._reminder_dialogs
         if text in MAIN_MENU_BUTTON_TEXTS or text in CONTENT_PLAN_DIALOG_BUTTON_TEXTS:
             return False
@@ -717,7 +942,7 @@ class TelegramPublisher:
             types.KeyboardButton(REGENERATE_REMINDER_TEXT_BUTTON_TEXT),
             types.KeyboardButton(REGENERATE_REMINDER_IMAGE_BUTTON_TEXT),
         )
-        keyboard.add(types.KeyboardButton(CANCEL_BUTTON_TEXT))
+        keyboard.add(types.KeyboardButton(BACK_BUTTON_TEXT))
         return keyboard
 
     def _send_manual_post_draft(
@@ -757,8 +982,16 @@ class TelegramPublisher:
             types.KeyboardButton(REGENERATE_MANUAL_TEXT_BUTTON_TEXT),
             types.KeyboardButton(REGENERATE_MANUAL_IMAGE_BUTTON_TEXT),
         )
-        keyboard.add(types.KeyboardButton(CANCEL_BUTTON_TEXT))
+        keyboard.add(types.KeyboardButton(BACK_BUTTON_TEXT))
         return keyboard
+
+    @staticmethod
+    def _parse_content_plan_item_id(text: str) -> int | None:
+        digits = "".join(character for character in text if character.isdigit())
+        if not digits:
+            return None
+        item_id = int(digits)
+        return item_id if item_id > 0 else None
 
     @staticmethod
     def _content_plan_menu_keyboard() -> types.ReplyKeyboardMarkup:
@@ -769,6 +1002,35 @@ class TelegramPublisher:
         )
         keyboard.add(types.KeyboardButton(REMINDERS_BUTTON_TEXT))
         return keyboard
+
+    @staticmethod
+    def _content_plan_view_keyboard() -> types.ReplyKeyboardMarkup:
+        keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        keyboard.add(
+            types.KeyboardButton(EDIT_CONTENT_PLAN_ITEM_BUTTON_TEXT),
+            types.KeyboardButton(DELETE_CONTENT_PLAN_ITEM_BUTTON_TEXT),
+        )
+        keyboard.add(
+            types.KeyboardButton(EDIT_CONTENT_PLAN_BUTTON_TEXT),
+            types.KeyboardButton(DELETE_CONTENT_PLAN_BUTTON_TEXT),
+        )
+        keyboard.add(types.KeyboardButton(BACK_BUTTON_TEXT))
+        return keyboard
+
+    @classmethod
+    def _format_content_plan_overview(
+        cls,
+        items: list[tuple[int, ContentPlanItem]],
+        plans: list[tuple[int, ContentPlan]],
+    ) -> str:
+        sections: list[str] = []
+        if plans:
+            lines = ["🗂️ Контент-планы:", ""]
+            for plan_id, plan in plans:
+                lines.append(f"КП #{plan_id}: {plan.title} ({len(plan.items)} пунктов)")
+            sections.append("\n".join(lines))
+        sections.append(cls._format_content_plan_items(items))
+        return "\n\n".join(sections).strip()
 
     @staticmethod
     def _format_content_plan_items(items: list[tuple[int, ContentPlanItem]]) -> str:
@@ -804,16 +1066,13 @@ class TelegramPublisher:
             types.KeyboardButton(REGENERATE_CONTENT_PLAN_BUTTON_TEXT),
             types.KeyboardButton(APPROVE_CONTENT_PLAN_BUTTON_TEXT),
         )
-        keyboard.add(
-            types.KeyboardButton(BACK_BUTTON_TEXT),
-            types.KeyboardButton(CANCEL_BUTTON_TEXT),
-        )
+        keyboard.add(types.KeyboardButton(BACK_BUTTON_TEXT))
         return keyboard
 
     @staticmethod
     def _content_plan_description_keyboard() -> types.ReplyKeyboardMarkup:
         keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
-        keyboard.add(types.KeyboardButton(CANCEL_BUTTON_TEXT))
+        keyboard.add(types.KeyboardButton(BACK_BUTTON_TEXT))
         return keyboard
 
     @staticmethod
@@ -829,28 +1088,31 @@ class TelegramPublisher:
         )
         keyboard.add(
             types.KeyboardButton(REMINDER_CUSTOM_BUTTON_TEXT),
-            types.KeyboardButton(CANCEL_BUTTON_TEXT),
+            types.KeyboardButton(BACK_BUTTON_TEXT),
         )
         return keyboard
 
     @staticmethod
     def _reminders_custom_keyboard() -> types.ReplyKeyboardMarkup:
         keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
-        keyboard.add(types.KeyboardButton(CANCEL_BUTTON_TEXT))
+        keyboard.add(types.KeyboardButton(BACK_BUTTON_TEXT))
         return keyboard
 
     def register_publication_approval_handler(
         self,
         approve_callback: Callable[[int], Any],
         reject_callback: Callable[[int], Any],
-        regenerate_text_callback: Callable[[int], ContentPlanItem],
-        regenerate_image_callback: Callable[[int], ContentPlanItem],
+        regenerate_text_callback: Callable[
+            [int], ContentPlanItem | tuple[ContentPlanItem, ImageAsset | None]
+        ],
+        regenerate_image_callback: Callable[
+            [int], ContentPlanItem | tuple[ContentPlanItem, ImageAsset | None]
+        ],
     ) -> None:
         """Register controls shown in pre-publication reminders."""
 
         @self.bot.message_handler(
-            func=lambda message: self._message_text(message)
-            in REMINDER_APPROVAL_BUTTON_TEXTS
+            func=lambda message: self._is_publication_approval_message(message)
         )
         def handle_publication_approval(message: Any) -> None:
             chat_id = self._message_chat_id(message)
@@ -860,7 +1122,7 @@ class TelegramPublisher:
                 self._send_control_message(chat_id, "Нет поста, ожидающего решения.")
                 return
             text = getattr(message, "text", None)
-            if text in {MENU_BUTTON_TEXT, CANCEL_BUTTON_TEXT}:
+            if text in {MENU_BUTTON_TEXT, CANCEL_BUTTON_TEXT, BACK_BUTTON_TEXT}:
                 self._pending_reminder_items.pop(chat_key, None)
                 self._send_main_menu(
                     chat_id,
@@ -873,7 +1135,7 @@ class TelegramPublisher:
                     self._pending_reminder_items.pop(chat_key, None)
                     self._send_control_message(
                         chat_id,
-                        "✅ Пост одобрен и опубликован в канале.",
+                        "✅ Пост одобрен и останется в расписании. Опубликуется по таймеру.",
                         reply_markup=self._manual_publish_keyboard(),
                     )
                 elif text == REJECT_REMINDER_BUTTON_TEXT:
@@ -885,15 +1147,35 @@ class TelegramPublisher:
                         reply_markup=self._manual_publish_keyboard(),
                     )
                 elif text == REGENERATE_REMINDER_TEXT_BUTTON_TEXT:
-                    item = regenerate_text_callback(item_id)
-                    self.send_publication_reminder(chat_id, item_id, item)
+                    item, image = self._unpack_regenerated_reminder_preview(
+                        regenerate_text_callback(item_id)
+                    )
+                    self.send_publication_reminder(chat_id, item_id, item, image)
                 elif text == REGENERATE_REMINDER_IMAGE_BUTTON_TEXT:
-                    item = regenerate_image_callback(item_id)
-                    self.send_publication_reminder(chat_id, item_id, item)
+                    item, image = self._unpack_regenerated_reminder_preview(
+                        regenerate_image_callback(item_id)
+                    )
+                    self.send_publication_reminder(chat_id, item_id, item, image)
             except Exception as exc:
                 self._send_control_message(
                     chat_id, f"❌ Не удалось выполнить действие: {exc}"
                 )
+
+    @staticmethod
+    def _unpack_regenerated_reminder_preview(
+        result: ContentPlanItem | tuple[ContentPlanItem, ImageAsset | None],
+    ) -> tuple[ContentPlanItem, ImageAsset | None]:
+        if isinstance(result, tuple):
+            return result
+        return result, None
+
+    def _is_publication_approval_message(self, message: Any) -> bool:
+        text = self._message_text(message)
+        if text not in REMINDER_APPROVAL_BUTTON_TEXTS:
+            return False
+        if text in {MENU_BUTTON_TEXT, CANCEL_BUTTON_TEXT, BACK_BUTTON_TEXT}:
+            return self._message_chat_key(message) in self._pending_reminder_items
+        return True
 
     def _set_quick_commands(self) -> None:
         """Expose /start and /menu in Telegram quick commands."""

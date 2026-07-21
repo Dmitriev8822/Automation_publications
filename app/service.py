@@ -7,6 +7,7 @@ from collections.abc import Callable
 from typing import Protocol
 
 from app.schemas import (
+    ContentPlan,
     ContentPlanItem,
     ContentPlanItemStatus,
     GeneratedPost,
@@ -29,6 +30,10 @@ class AIClientProtocol(Protocol):
     def generate_post(self, news: News) -> GeneratedPost: ...
 
     def generate_image(self, post: GeneratedPost) -> ImageAsset | None: ...
+
+    def regenerate_content_plan(
+        self, plan: "ContentPlan", instruction: str = ""
+    ) -> "ContentPlan": ...
 
     def regenerate_content_plan_item_text(
         self, item: ContentPlanItem, instruction: str = ""
@@ -79,6 +84,16 @@ class ContentPlanRepositoryProtocol(Protocol):
     def update_item_content(
         self, item_id: int, item: ContentPlanItem
     ) -> ContentPlanItem: ...
+
+    def get_plan(self, plan_id: int) -> ContentPlan: ...
+
+    def mark_plan_cancelled(
+        self, plan_id: int, error_message: str | None = None
+    ) -> list[ContentPlanItem]: ...
+
+    def replace_plan(
+        self, plan_id: int, plan: ContentPlan
+    ) -> tuple[int, ContentPlan]: ...
 
 
 def create_manual_publication_draft(
@@ -261,7 +276,9 @@ def _notify_image_result(
     if image_error:
         _notify(progress_callback, f"⚠️ Изображение не сгенерировано: {image_error}")
     else:
-        _notify(progress_callback, "ℹ️ Изображение не сгенерировано, публикую без картинки.")
+        _notify(
+            progress_callback, "ℹ️ Изображение не сгенерировано, публикую без картинки."
+        )
 
 
 def _notify(progress_callback: ProgressCallback | None, message: str) -> None:
@@ -278,7 +295,14 @@ def publish_due_content_plan_items(
     content_plan_repository: ContentPlanRepositoryProtocol,
     ai_client: AIClientProtocol | None = None,
 ) -> list[ContentPlanItem]:
-    """Publish all approved content-plan items whose scheduled time has come."""
+    """Publish due content-plan items without regenerating approved text.
+
+    ``ai_client`` is kept only for backwards-compatible callers that explicitly
+    want image generation at publication time. The scheduled runtime does not
+    pass it, so an already approved content-plan post is sent to Telegram as it
+    was saved instead of asking AI to create a fresh variant right before
+    publication.
+    """
 
     published_items: list[ContentPlanItem] = []
     due_items = content_plan_repository.get_due_items()
@@ -318,38 +342,21 @@ def approve_content_plan_item_publication(
     content_plan_repository: ContentPlanRepositoryProtocol,
     ai_client: AIClientProtocol | None = None,
 ) -> ContentPlanItem:
-    """Immediately publish one content-plan item after user approval.
+    """Keep one scheduled content-plan item active after user approval.
 
-    A reminder approval is an explicit user decision to publish the prepared
-    post. The item is sent to Telegram right away and marked as published, so a
-    later scheduler date-job will skip it because it is no longer scheduled.
+    Approval in a reminder means the user has not refused publication. The item
+    must remain scheduled and will be published only by its date-job at
+    ``scheduled_at``. If the user does not answer the reminder at all, the same
+    scheduled publication path still runs. Only an explicit rejection cancels the
+    item.
     """
 
     item = content_plan_repository.get_item(item_id)
     if item.status != ContentPlanItemStatus.SCHEDULED:
         raise RuntimeError(
-            f"Content-plan item {item_id} cannot be published from status {item.status.value}"
+            f"Content-plan item {item_id} cannot be approved from status {item.status.value}"
         )
-
-    generated_post = GeneratedPost(
-        title=item.title,
-        text=item.text,
-        image_prompt=item.image_prompt,
-        source_url=item.source_url or f"https://content-plan.local/items/{item_id}",
-    )
-    try:
-        image = (
-            ai_client.generate_image(generated_post)
-            if ai_client is not None and item.image_prompt
-            else None
-        )
-        message_id = telegram_publisher.publish_post(generated_post, image)
-        return content_plan_repository.mark_item_published(item_id, message_id)
-    except Exception as exc:
-        content_plan_repository.mark_item_failed(
-            item_id, str(exc) or exc.__class__.__name__
-        )
-        raise
+    return item
 
 
 def reject_content_plan_item_publication(
@@ -388,3 +395,28 @@ def regenerate_content_plan_item_image(
     item = content_plan_repository.get_item(item_id)
     regenerated = ai_client.regenerate_content_plan_item_image_prompt(item, instruction)
     return content_plan_repository.update_item_content(item_id, regenerated)
+
+
+def reject_content_plan_publication(
+    plan_id: int,
+    content_plan_repository: ContentPlanRepositoryProtocol,
+    reason: str | None = None,
+) -> list[ContentPlanItem]:
+    """Cancel all scheduled items of one content plan after user deletion."""
+
+    return content_plan_repository.mark_plan_cancelled(
+        plan_id, reason or "User deleted content plan"
+    )
+
+
+def regenerate_content_plan(
+    plan_id: int,
+    ai_client: AIClientProtocol,
+    content_plan_repository: ContentPlanRepositoryProtocol,
+    instruction: str = "",
+) -> tuple[int, ContentPlan]:
+    """Regenerate and persist a whole content plan using a user instruction."""
+
+    plan = content_plan_repository.get_plan(plan_id)
+    regenerated = ai_client.regenerate_content_plan(plan, instruction)
+    return content_plan_repository.replace_plan(plan_id, regenerated)

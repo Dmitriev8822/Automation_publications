@@ -123,13 +123,15 @@ Unit-тесты должны передавать fake-объекты вмест
 
 ## Предпубликационное согласование пунктов контент-плана
 
-`publish_due_content_plan_items(telegram_publisher, content_plan_repository, ai_client=None)` теперь может получать `ai_client`: если он передан, перед публикацией пункта контент-плана генерируется картинка по `image_prompt`, и в Telegram уходит пост вместе с изображением.
+`publish_due_content_plan_items(telegram_publisher, content_plan_repository, ai_client=None)` может получать `ai_client` только для обратной совместимости или специальных вызовов: если он передан явно, перед публикацией пункта контент-плана генерируется картинка по `image_prompt`. Актуальный runtime `app/main.py` намеренно не передает `ai_client` в плановую публикацию, чтобы после согласования контент-плана в группу уходил сохраненный текст без повторного AI-вызова перед отправкой.
 
 Для сценария напоминаний добавлены функции:
 
-- `approve_content_plan_item_publication(item_id, telegram_publisher, content_plan_repository, ai_client=None)` — после одобрения пользователя сразу публикует конкретный пункт в Telegram, при наличии `ai_client` генерирует изображение по `image_prompt`, помечает пункт как `published`, а при ошибке сохраняет `failed` и пробрасывает исключение;
+- `approve_content_plan_item_publication(item_id, telegram_publisher, content_plan_repository, ai_client=None)` — после одобрения пользователя не публикует пункт сразу, а проверяет, что он все еще `scheduled`, и оставляет его в расписании; публикация произойдет только по date-job в `scheduled_at`;
 - `reject_content_plan_item_publication(item_id, content_plan_repository, reason=None)` — отменяет пункт после отказа пользователя;
-- `regenerate_content_plan_item_text(item_id, ai_client, content_plan_repository, instruction="")` — просит AI обновить текст и сохраняет результат;
-- `regenerate_content_plan_item_image(item_id, ai_client, content_plan_repository, instruction="")` — просит AI обновить prompt картинки и сохраняет результат.
+- `regenerate_content_plan_item_text(item_id, ai_client, content_plan_repository, instruction="")` — просит AI обновить текст по свободной инструкции пользователя из Telegram и сохраняет результат;
+- `regenerate_content_plan_item_image(item_id, ai_client, content_plan_repository, instruction="")` — просит AI обновить prompt картинки и сохраняет результат;
+- `reject_content_plan_publication(plan_id, content_plan_repository, reason=None)` — отменяет все scheduled-пункты выбранного плана;
+- `regenerate_content_plan(plan_id, ai_client, content_plan_repository, instruction="")` — просит AI перестроить весь контент-план по свободной инструкции пользователя и сохраняет обновленную версию.
 
-Так `service.py` остается единственным местом бизнес-процесса публикации и управляет связкой AI → изображение → Telegram → статус в БД. После успешного одобрения статус становится `published`, поэтому запланированный ранее date-job не выполнит повторную публикацию этого же пункта.
+Так `service.py` остается единственным местом бизнес-процесса публикации и управляет связкой AI → изображение → Telegram → статус в БД. После успешного одобрения статус остается `scheduled`, поэтому запланированный ранее date-job выполнит публикацию в исходное время. Если пользователь не отвечает на напоминание, пункт также остается `scheduled` и публикуется по таймеру; только явный отказ переводит пункт в отмененное состояние.

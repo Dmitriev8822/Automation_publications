@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -12,6 +13,7 @@ from app.config import Settings
 from app.schemas import GeneratedPost, ImageAsset
 from app.telegram import (
     MANUAL_PUBLISH_BUTTON_TEXT,
+    REGENERATE_REMINDER_IMAGE_BUTTON_TEXT,
     START_INSTRUCTION_TEXT,
     TelegramPublisher,
 )
@@ -389,7 +391,14 @@ def dispatch_text(bot: FakeBot, chat_id: int, text: str) -> None:
     message = SimpleNamespace(chat=SimpleNamespace(id=chat_id), text=text)
     for handler in bot.handlers:
         predicate = handler["kwargs"].get("func")
-        if predicate is None or predicate(message):
+        commands = handler["kwargs"].get("commands")
+        if commands is not None:
+            command = text.removeprefix("/") if text.startswith("/") else None
+            if command in commands:
+                handler["func"](message)
+                return
+            continue
+        if predicate is not None and predicate(message):
             handler["func"](message)
             return
     raise AssertionError(f"No handler matched text: {text}")
@@ -484,7 +493,28 @@ def test_reminders_dialog_saves_minutes_and_approval_handler_confirms_publicatio
     assert publisher.reminder_chat_id == 777
     assert configured == [(15, 777)]
     assert approved == [42]
-    assert bot.sent_messages[-1]["text"] == "✅ Пост одобрен и опубликован в канале."
+    assert (
+        bot.sent_messages[-1]["text"]
+        == "✅ Пост одобрен и останется в расписании. Опубликуется по таймеру."
+    )
+
+
+def test_publication_approval_regeneration_can_resend_image_preview() -> None:
+    bot = FakeBot()
+    publisher = TelegramPublisher(settings=make_settings(), bot=bot)
+
+    publisher.register_publication_approval_handler(
+        lambda item_id: None,
+        lambda item_id: None,
+        lambda item_id: (make_plan().items[0], ImageAsset(data=b"new-image")),
+        lambda item_id: (make_plan().items[0], ImageAsset(data=b"new-image")),
+    )
+    publisher.send_publication_reminder(777, 42, make_plan().items[0])
+
+    dispatch_text(bot, 777, REGENERATE_REMINDER_IMAGE_BUTTON_TEXT)
+
+    assert bot.sent_photos[-1]["chat_id"] == 777
+    assert "Картинка:" in bot.sent_photos[-1]["caption"]
 
 
 def test_reminders_dialog_supports_preset_and_custom_minutes() -> None:
@@ -595,6 +625,31 @@ def test_publication_approval_handler_matches_persisted_string_chat_id() -> None
 from app.telegram import BACK_BUTTON_TEXT, CANCEL_BUTTON_TEXT, MENU_BUTTON_TEXT
 
 
+def _keyboard_texts(reply_markup) -> list[str]:
+    payload = json.loads(reply_markup.to_json())
+    return [button["text"] for row in payload["keyboard"] for button in row]
+
+
+def test_dialog_keyboards_show_back_button_instead_of_cancel() -> None:
+    bot = FakeBot()
+    publisher = TelegramPublisher(settings=make_settings(), bot=bot)
+
+    keyboards = [
+        publisher._manual_post_approval_keyboard(),
+        publisher._content_plan_view_keyboard(),
+        publisher._content_plan_approval_keyboard(),
+        publisher._content_plan_description_keyboard(),
+        publisher._reminder_approval_keyboard(),
+        publisher._reminders_settings_keyboard(),
+        publisher._reminders_custom_keyboard(),
+    ]
+
+    for keyboard in keyboards:
+        texts = _keyboard_texts(keyboard)
+        assert BACK_BUTTON_TEXT in texts
+        assert CANCEL_BUTTON_TEXT not in texts
+
+
 def test_content_plan_dialog_back_returns_to_description_step() -> None:
     bot = FakeBot()
     publisher = TelegramPublisher(settings=make_settings(), bot=bot)
@@ -616,7 +671,7 @@ def test_content_plan_dialog_back_returns_to_description_step() -> None:
     assert "Вернулись на шаг описания" in bot.sent_messages[-3]["text"]
 
 
-def test_content_plan_dialog_cancel_returns_main_menu_without_approval() -> None:
+def test_content_plan_dialog_back_returns_main_menu_without_approval() -> None:
     bot = FakeBot()
     publisher = TelegramPublisher(settings=make_settings(), bot=bot)
     approved: list[ContentPlan] = []
@@ -626,14 +681,14 @@ def test_content_plan_dialog_cancel_returns_main_menu_without_approval() -> None
     )
 
     dispatch_text(bot, 555, CONTENT_PLAN_BUTTON_TEXT)
-    dispatch_text(bot, 555, CANCEL_BUTTON_TEXT)
+    dispatch_text(bot, 555, BACK_BUTTON_TEXT)
 
     assert approved == []
-    assert "Диалог контент-плана отменен" in bot.sent_messages[-1]["text"]
+    assert "Диалог контент-плана закрыт" in bot.sent_messages[-1]["text"]
     assert bot.sent_messages[-1]["reply_markup"] is not None
 
 
-def test_reminders_dialog_cancel_returns_main_menu_without_saving() -> None:
+def test_reminders_dialog_back_returns_main_menu_without_saving() -> None:
     bot = FakeBot()
     publisher = TelegramPublisher(settings=make_settings(), bot=bot)
     configured: list[tuple[int | None, int | str]] = []
@@ -643,7 +698,7 @@ def test_reminders_dialog_cancel_returns_main_menu_without_saving() -> None:
     )
 
     dispatch_text(bot, 777, REMINDERS_BUTTON_TEXT)
-    dispatch_text(bot, 777, MENU_BUTTON_TEXT)
+    dispatch_text(bot, 777, BACK_BUTTON_TEXT)
 
     assert configured == []
     assert publisher.reminder_minutes_before is None
@@ -651,7 +706,7 @@ def test_reminders_dialog_cancel_returns_main_menu_without_saving() -> None:
     assert bot.sent_messages[-1]["reply_markup"] is not None
 
 
-def test_publication_approval_cancel_closes_pending_item_without_callback() -> None:
+def test_publication_approval_back_closes_pending_item_without_callback() -> None:
     bot = FakeBot()
     publisher = TelegramPublisher(settings=make_settings(), bot=bot)
     approved: list[int] = []
@@ -665,7 +720,7 @@ def test_publication_approval_cancel_closes_pending_item_without_callback() -> N
     )
 
     publisher.send_publication_reminder(777, 42, make_plan().items[0])
-    dispatch_text(bot, 777, CANCEL_BUTTON_TEXT)
+    dispatch_text(bot, 777, BACK_BUTTON_TEXT)
     dispatch_text(bot, 777, APPROVE_REMINDER_BUTTON_TEXT)
 
     assert approved == []
@@ -776,3 +831,160 @@ def test_content_plan_menu_can_view_existing_items_and_start_compose() -> None:
     assert "Выберите действие" in bot.sent_messages[0]["text"]
     assert "#7" in bot.sent_messages[1]["text"]
     assert calls == [("план на неделю", [])]
+
+
+from app.telegram import (
+    EDIT_CONTENT_PLAN_BUTTON_TEXT,
+    DELETE_CONTENT_PLAN_BUTTON_TEXT,
+    EDIT_CONTENT_PLAN_ITEM_BUTTON_TEXT,
+    DELETE_CONTENT_PLAN_ITEM_BUTTON_TEXT,
+)
+
+
+def test_content_plan_view_can_delete_existing_item() -> None:
+    bot = FakeBot()
+    publisher = TelegramPublisher(settings=make_settings(), bot=bot)
+    deleted: list[int] = []
+
+    publisher.register_content_plan_handler(
+        lambda description, context=None: make_plan(),
+        lambda plan: None,
+        lambda: [(7, make_plan().items[0])],
+        deleted.append,
+        lambda item_id, instruction: make_plan().items[0],
+    )
+
+    dispatch_text(bot, 555, CONTENT_PLAN_BUTTON_TEXT)
+    dispatch_text(bot, 555, VIEW_CONTENT_PLAN_BUTTON_TEXT)
+    dispatch_text(bot, 555, DELETE_CONTENT_PLAN_ITEM_BUTTON_TEXT)
+    dispatch_text(bot, 555, "#7")
+
+    assert deleted == [7]
+    assert "Пункт КП #7 удален" in bot.sent_messages[-1]["text"]
+
+
+def test_content_plan_view_can_edit_existing_item_with_ai_instruction() -> None:
+    bot = FakeBot()
+    publisher = TelegramPublisher(settings=make_settings(), bot=bot)
+    edits: list[tuple[int, str]] = []
+    updated = (
+        make_plan()
+        .items[0]
+        .model_copy(update={"title": "Обновленный пост", "text": "Новый текст"})
+    )
+
+    def edit(item_id: int, instruction: str) -> ContentPlanItem:
+        edits.append((item_id, instruction))
+        return updated
+
+    publisher.register_content_plan_handler(
+        lambda description, context=None: make_plan(),
+        lambda plan: None,
+        lambda: [(7, make_plan().items[0])],
+        lambda item_id: None,
+        edit,
+    )
+
+    dispatch_text(bot, 555, CONTENT_PLAN_BUTTON_TEXT)
+    dispatch_text(bot, 555, VIEW_CONTENT_PLAN_BUTTON_TEXT)
+    dispatch_text(bot, 555, EDIT_CONTENT_PLAN_ITEM_BUTTON_TEXT)
+    dispatch_text(bot, 555, "7")
+    dispatch_text(bot, 555, "сделай текст короче и добавь акцент на пользу")
+
+    assert edits == [(7, "сделай текст короче и добавь акцент на пользу")]
+    assert "Пункт КП #7 обновлен через ИИ" in bot.sent_messages[-1]["text"]
+    assert "Обновленный пост" in bot.sent_messages[-1]["text"]
+
+
+def test_content_plan_view_can_delete_whole_plan() -> None:
+    bot = FakeBot()
+    publisher = TelegramPublisher(settings=make_settings(), bot=bot)
+    deleted_plans: list[int] = []
+
+    publisher.register_content_plan_handler(
+        lambda description, context=None: make_plan(),
+        lambda plan: None,
+        lambda: [(7, make_plan().items[0])],
+        lambda item_id: None,
+        lambda item_id, instruction: make_plan().items[0],
+        lambda: [(3, make_plan())],
+        deleted_plans.append,
+        lambda plan_id, instruction: make_plan(),
+    )
+
+    dispatch_text(bot, 555, CONTENT_PLAN_BUTTON_TEXT)
+    dispatch_text(bot, 555, VIEW_CONTENT_PLAN_BUTTON_TEXT)
+    dispatch_text(bot, 555, DELETE_CONTENT_PLAN_BUTTON_TEXT)
+    dispatch_text(bot, 555, "3")
+
+    assert deleted_plans == [3]
+    assert "Контент-план #3 удален" in bot.sent_messages[-1]["text"]
+
+
+def test_content_plan_view_can_edit_whole_plan_with_ai_instruction() -> None:
+    bot = FakeBot()
+    publisher = TelegramPublisher(settings=make_settings(), bot=bot)
+    edited_plans: list[tuple[int, str]] = []
+    updated_plan = make_plan().model_copy(update={"title": "Обновленный КП"})
+
+    def edit_plan(plan_id: int, instruction: str) -> ContentPlan:
+        edited_plans.append((plan_id, instruction))
+        return updated_plan
+
+    publisher.register_content_plan_handler(
+        lambda description, context=None: make_plan(),
+        lambda plan: None,
+        lambda: [(7, make_plan().items[0])],
+        lambda item_id: None,
+        lambda item_id, instruction: make_plan().items[0],
+        lambda: [(3, make_plan())],
+        lambda plan_id: None,
+        edit_plan,
+    )
+
+    dispatch_text(bot, 555, CONTENT_PLAN_BUTTON_TEXT)
+    dispatch_text(bot, 555, VIEW_CONTENT_PLAN_BUTTON_TEXT)
+    dispatch_text(bot, 555, EDIT_CONTENT_PLAN_BUTTON_TEXT)
+    dispatch_text(bot, 555, "3")
+    dispatch_text(bot, 555, "измени весь план на следующую неделю")
+
+    assert edited_plans == [(3, "измени весь план на следующую неделю")]
+    assert "Контент-план #3 обновлен через ИИ" in bot.sent_messages[-1]["text"]
+    assert "Обновленный КП" in bot.sent_messages[-1]["text"]
+
+
+def test_back_from_content_plan_delete_is_not_handled_as_manual_approval() -> None:
+    bot = FakeBot()
+    publisher = TelegramPublisher(settings=make_settings(), bot=bot)
+
+    publisher.register_manual_publish_handler(
+        lambda progress: make_manual_draft(),
+        lambda draft: None,
+        lambda draft: draft,
+        lambda draft: draft,
+    )
+    publisher.register_content_plan_handler(
+        lambda description, context=None: make_plan(),
+        lambda plan: None,
+        lambda: [(7, make_plan().items[0])],
+        lambda item_id: None,
+        lambda item_id, instruction: make_plan().items[0],
+        lambda: [(3, make_plan())],
+        lambda plan_id: None,
+        lambda plan_id, instruction: make_plan(),
+    )
+
+    dispatch_text(bot, 555, CONTENT_PLAN_BUTTON_TEXT)
+    dispatch_text(bot, 555, VIEW_CONTENT_PLAN_BUTTON_TEXT)
+    dispatch_text(bot, 555, DELETE_CONTENT_PLAN_BUTTON_TEXT)
+    dispatch_text(bot, 555, BACK_BUTTON_TEXT)
+
+    assert (
+        bot.sent_messages[-1]["text"]
+        == "Вернулись в меню контент-плана. Выберите действие."
+    )
+    assert bot.sent_messages[-1]["reply_markup"] is not None
+    assert all(
+        message["text"] != "Нет новости, ожидающей согласования."
+        for message in bot.sent_messages
+    )
