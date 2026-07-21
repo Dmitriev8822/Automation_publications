@@ -295,7 +295,14 @@ def publish_due_content_plan_items(
     content_plan_repository: ContentPlanRepositoryProtocol,
     ai_client: AIClientProtocol | None = None,
 ) -> list[ContentPlanItem]:
-    """Publish all approved content-plan items whose scheduled time has come."""
+    """Publish due content-plan items without regenerating approved text.
+
+    ``ai_client`` is kept only for backwards-compatible callers that explicitly
+    want image generation at publication time. The scheduled runtime does not
+    pass it, so an already approved content-plan post is sent to Telegram as it
+    was saved instead of asking AI to create a fresh variant right before
+    publication.
+    """
 
     published_items: list[ContentPlanItem] = []
     due_items = content_plan_repository.get_due_items()
