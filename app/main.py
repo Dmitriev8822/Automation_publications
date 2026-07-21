@@ -127,9 +127,7 @@ def build_runtime(settings: Settings) -> ApplicationRuntime:
     telegram_publisher = TelegramPublisher(settings)
 
     def scheduled_content_plan_job():
-        publish_due_content_plan_items(
-            telegram_publisher, content_plan_repository, ai_client
-        )
+        publish_due_content_plan_items(telegram_publisher, content_plan_repository)
 
     manual_prepare_job = lambda progress: create_manual_publication_draft(
         ai_client, repository, progress_callback=progress

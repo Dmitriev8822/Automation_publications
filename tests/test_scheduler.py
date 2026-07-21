@@ -211,6 +211,72 @@ def test_build_runtime_applies_persistent_reminders_to_existing_and_new_items(
     }
 
 
+def test_build_runtime_scheduled_content_plan_job_does_not_pass_ai_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app import main as app_main
+
+    captured_ai_clients: list[object] = []
+
+    class DummySettings:
+        publish_interval_minutes = 1
+
+    class DummyTelegramPublisher:
+        def __init__(self, settings) -> None:
+            self.reminder_minutes_before = None
+            self.reminder_chat_id = None
+
+        def register_manual_publish_handler(self, *args) -> None:
+            pass
+
+        def register_content_plan_handler(self, *args) -> None:
+            pass
+
+    class DummyAIClient:
+        def __init__(self, settings) -> None:
+            pass
+
+        def generate_content_plan(self, request: str):
+            return request
+
+    class DummyPostRepository:
+        pass
+
+    class DummyContentPlanRepository:
+        def get_scheduled_item_slots(self):
+            return [(1, datetime.now(timezone.utc) + timedelta(minutes=10))]
+
+    class DummyReminderSettingsRepository:
+        def get_settings(self):
+            return False, None, None
+
+        def enable(self, minutes, chat_id) -> None:
+            pass
+
+        def disable(self) -> None:
+            pass
+
+    def fake_publish_due(telegram_publisher, content_plan_repository, ai_client=None):
+        captured_ai_clients.append(ai_client)
+        return []
+
+    monkeypatch.setattr(app_main, "validate_runtime_settings", lambda settings: None)
+    monkeypatch.setattr(app_main, "init_db", lambda: None)
+    monkeypatch.setattr(app_main, "PostRepository", DummyPostRepository)
+    monkeypatch.setattr(app_main, "ContentPlanRepository", DummyContentPlanRepository)
+    monkeypatch.setattr(
+        app_main, "ReminderSettingsRepository", DummyReminderSettingsRepository
+    )
+    monkeypatch.setattr(app_main, "AIClient", DummyAIClient)
+    monkeypatch.setattr(app_main, "TelegramPublisher", DummyTelegramPublisher)
+    monkeypatch.setattr(app_main, "publish_due_content_plan_items", fake_publish_due)
+
+    runtime = app_main.build_runtime(DummySettings())
+    runtime.scheduler.get_job("content_plan_item_1").func()
+
+    assert captured_ai_clients == [None]
+
+
 def test_create_scheduler_registers_job_function() -> None:
     calls: list[str] = []
     scheduler = create_scheduler(lambda: calls.append("called"), interval_minutes=1)
